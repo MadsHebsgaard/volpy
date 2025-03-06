@@ -19,7 +19,6 @@ def dirs(profile):
     return dir
 
 
-
 def load_od_FW_ZCY(profile, dataset):
 
     dir = dirs(profile)
@@ -54,8 +53,6 @@ def load_od_FW_ZCY(profile, dataset):
         data = np.nan
 
     return data["od"], data["FW"], ZCY_curves  # could also return data["od"] og data["FW"]
-
-
 
 
 
