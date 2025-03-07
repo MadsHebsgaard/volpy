@@ -83,7 +83,7 @@ def summary_dly_df_creator(od):
     # Initialize the data structure
     index = pd.MultiIndex.from_product([unique_tickers, unique_dates], names=["Ticker", "Date"])
     summary_dly_df = pd.DataFrame(index=index,
-                                  columns=["#days", "low days", "high days", "low #K", "high #K", "low SW", "high SW", "Active",
+                                  columns=["#days", "low days", "high days", "low #K", "high #K", "#K", "low SW", "high SW", "Active",
                                            "Inactive reason"])
     # Default
     summary_dly_df["low SW"] = np.nan
@@ -93,6 +93,7 @@ def summary_dly_df_creator(od):
     summary_dly_df["high days"] = np.nan
     summary_dly_df["low #K"] = np.nan
     summary_dly_df["high #K"] = np.nan
+    summary_dly_df["#K"] = np.nan
 
     summary_dly_df["Active"] = False
     summary_dly_df["Inactive reason"] = "missing"

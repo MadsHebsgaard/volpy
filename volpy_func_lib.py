@@ -269,9 +269,9 @@ def process_group_activity_summary(group):
             active = False
             summary["Active"] = False
             summary["Inactive reason"] = "unique(K) < 3"
+    summary[f"#K"] = (summary[f"low #K"] + summary[f"high #K"]) / 2
     if not active:
         return group, summary
-    summary[f"NK"] = summary[f"low #K"] + summary[f"high #K"]
 
     summary["Active"] = True
     summary["Inactive reason"] = ""
@@ -279,25 +279,6 @@ def process_group_activity_summary(group):
     # Set the 'low' and 'high' flags for the corresponding rows
     group.loc[group["days"] == low_2_days[0], "low"] = True
     group.loc[group["days"] == low_2_days[1], "high"] = True
-
-    # # For each of the two selected days, update IV_option_price and moneyness
-    # for day in low_2_days:
-    #     TTM = day / 365.0
-    #     mask = group["days"] == day
-    #     # Calculate IV_option_price using the BSM model row-wise
-    #     group.loc[mask, "IV_option_price"] = group.loc[mask].apply(
-    #         lambda row: vp.BSM(
-    #             row["F"],
-    #             row["K"],
-    #             TTM,
-    #             row["impl_volatility"],
-    #             row["r"],
-    #             row["cp_flag"]
-    #         ),
-    #         axis=1
-    #     )
-    #     # Assuming F is defined in the outer scope (or alternatively use row["F"])
-    #     group.loc[mask, "moneyness"] = np.log10(group.loc[mask, "F"] / group.loc[mask, "K"])
 
     return group, summary
 
