@@ -271,6 +271,7 @@ def process_group_activity_summary(group):
             summary["Inactive reason"] = "unique(K) < 3"
     if not active:
         return group, summary
+    summary[f"NK"] = summary[f"low #K"] + summary[f"high #K"]
 
     summary["Active"] = True
     summary["Inactive reason"] = ""
@@ -539,7 +540,7 @@ def replicate_SW(group, n_points = 100):
     group = group.sort_values("k")
 
     # Arrays of available moneyness and implied vol
-    k_data = group["k"].values
+    K_data = group["K"].values
     iv_data = group["impl_volatility"].values
 
     # 3) Define a fine moneyness grid ±8 stdevs from 0 (i.e. from -8*stdev to +8*stdev)
@@ -547,24 +548,21 @@ def replicate_SW(group, n_points = 100):
     k_max = 8 * stdev
     k_grid = np.linspace(k_min, k_max, n_points)  # 2000 points as per your spec
 
+    # Convert moneyness back to strikes
+    K_grid = F * np.exp(k_grid)
+
+
     # 4) Interpolate implied vol across k_grid
-    #    Extrapolate by taking the edge vol for k < k_data.min() or k > k_data.max().
-    iv_grid = np.interp(k_grid, k_data, iv_data,
+    #    Extrapolate by taking the edge vol for K < K_data.min() or K > K_data.max().
+    iv_grid = np.interp(K_grid, K_data, iv_data,
                         left=iv_data[0],
                         right=iv_data[-1])
 
-    # Convert moneyness back to strikes: K = F * exp(k)
-    K_grid = F * np.exp(k_grid)
-
     # 5) Compute out-of-the-money option prices:
-    #    - Call if K < F => k < 0 => actually that means k < 0 => ln(K/F) < 0 => K < F
-    #      (But watch sign: ln(K/F) < 0 => K < F => OTM call)
-    #    - Put if K >= F => k >= 0 => K >= F => OTM put
-    #    (Carr & Wu typically use calls for K>F and puts for K<F or vice versa, but the idea is:
-    #     only out-of-the-money options are used. We'll do "Call if K<F, Put if K>=F".)
+    #    Cal if K>F and put else: only out-of-the-money options are used.
     option_prices = []
-    for k_val, K_val, sigma_val in zip(k_grid, K_grid, iv_grid):
-        is_call = (K_val < F)  # True => call, False => put
+    for K_val, sigma_val in zip(K_grid, iv_grid):
+        is_call = (K_val > F)  # True => call, False => put
         price = BSM_call_put(F, K_val, T, sigma_val, r, is_call=is_call)
         option_prices.append(price)
     option_prices = np.array(option_prices)
