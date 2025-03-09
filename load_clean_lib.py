@@ -29,6 +29,7 @@ def load_od_FW_ZCY(profile, dataset):
         # "RV": (dir["i4s4"] / "realized vol.csv", vp.load_realized_volatility),
         # "IV": (dir["i4s4"] / "implied vol.csv", vp.load_implied_volatility),
         "FW": (dir["i4s4"] / "forward price.csv", vp.load_forward_price),  # Forward data on i4s4
+        "ret": (dir["i4s4"] / "returns and stock price.csv", vp.load_returns_and_price)
     }
 
     # Load all i4s4 data into a dictionary
@@ -52,7 +53,7 @@ def load_od_FW_ZCY(profile, dataset):
         print("Error: choose a viable dataset such as 'i4s4' or 'sp500'. Default is nan.")
         data = np.nan
 
-    return data["od"], data["FW"], ZCY_curves  # could also return data["od"] og data["FW"]
+    return data["od"], data["FW"], ZCY_curves, data["ret"]
 
 
 

@@ -119,6 +119,30 @@ def load_forward_price(file_path):
 
     return df
 
+def load_returns_and_price(file_path):
+    # Read the CSV file into a DataFrame
+    returns_and_prices = pd.read_csv(file_path)
+
+    # Convert 'date' column to datetime format
+    returns_and_prices['date'] = pd.to_datetime(returns_and_prices['date'])
+
+    # remove na
+    returns_and_prices = returns_and_prices.dropna(subset=["return"])
+
+    # Ensure the DataFrame is sorted
+    returns_and_prices = returns_and_prices.sort_values(by=["ticker", "date"])
+
+    # Compute squared daily returns
+    returns_and_prices["squared_return"] = returns_and_prices["return"] ** 2
+
+    # # Filtrer data for at inkludere kun rækker med datoer mellem first_day og last_day
+    # first_day = pd.to_datetime("1996-01-04")
+    # last_day = pd.to_datetime("2003-02-28") + pd.Timedelta(days=30)
+    # returns_and_prices = returns_and_prices[
+    #     (returns_and_prices['date'] >= first_day) & (returns_and_prices['date'] <= last_day)
+    # ]
+    return returns_and_prices
+
 
 def load_ZC_yield_curve(file_path):
     df = pd.read_csv(file_path)
@@ -155,11 +179,66 @@ def add_FW_to_od(od, FW):
     return od
 
 
+def calc_realized_var(returns_and_prices, first_day, last_day):
+    # Filter and explicitly copy the DataFrame
+    last_day_ret = last_day + pd.Timedelta(days=30)
+    returns_and_prices = returns_and_prices[
+        (returns_and_prices['date'] >= first_day) & (returns_and_prices['date'] <= last_day_ret)
+    ].copy()
+
+    def sum_next_30_days(group):
+        group = group.sort_values(by='date')
+        rv_list = []
+        active_days_list = []
+
+        for i, row in group.iterrows():
+            current_date = row['date']
+            end_date = current_date + pd.Timedelta(days=30)
+            mask = (group['date'] >= current_date) & (group['date'] < end_date)
+            window_data = group.loc[mask]
+            rv_sum = window_data['squared_return'].sum()
+            active_days = window_data.shape[0]
+            rv_list.append(rv_sum)
+            active_days_list.append(active_days)
+
+        result = pd.DataFrame({
+            'RV': rv_list,
+            'N_tradingdays': active_days_list
+        }, index=group.index)
+        return result
+
+    result_df = (
+        returns_and_prices.groupby('ticker')
+        .apply(sum_next_30_days)
+        .reset_index(level=0, drop=True)
+    )
+
+    # Use .loc to set the new columns
+    returns_and_prices.loc[:, 'RV_scaled'] = result_df['RV'] * (252 / result_df['N_tradingdays'])
+    returns_and_prices.loc[:, 'N_tradingdays'] = result_df['N_tradingdays']
+
+    # Filter again and explicitly copy the DataFrame
+    returns_and_prices = returns_and_prices[
+        (returns_and_prices['date'] >= first_day) & (returns_and_prices['date'] <= last_day)
+    ].copy()
+
+    returns_and_prices = returns_and_prices[
+        ~((returns_and_prices['ticker'] == 'DJX') & (returns_and_prices['date'] < pd.to_datetime("1997-10-06")))
+    ].copy()
+
+    returns_and_prices = returns_and_prices[
+        ~((returns_and_prices['ticker'] == 'AMZN') & (returns_and_prices['date'] < pd.to_datetime("1997-11-19")))
+    ].copy()
+
+    returns_and_prices["RV"] = returns_and_prices["RV_scaled"]
+    returns_and_prices.drop(['RV_scaled'], axis=1) # todo: make this always RV instead of new column and then rename and remove scaled
+
+    return returns_and_prices
+
+
 
 from functools import partial
 import concurrent.futures
-import pandas as pd
-import numpy as np
 
 
 def compute_rates_for_date(group, ZCY_curves):
