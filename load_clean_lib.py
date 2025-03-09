@@ -7,8 +7,7 @@ def dirs(profile):
     if profile == "Mads":
         Option_metrics_path = Path(r"D:\Finance Data\OptionMetrics")
     elif profile == "Axel":
-        Option_metrics_path = Path(r"D:\Finance Data\OptionMetrics") # todo: indsæt din file path til OptionMetrics folder
-
+        Option_metrics_path = Path(r"C:\Users\axell\Desktop\CBS\data\OptionMetrics") 
     dir = {
         "OptionMetrics": Option_metrics_path,
         "CarrWu": Option_metrics_path / "1996-2003 (CarrWu2009)",
