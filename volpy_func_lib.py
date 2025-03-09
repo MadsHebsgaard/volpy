@@ -154,30 +154,62 @@ def add_FW_to_od(od, FW):
     od = od.groupby(["date", "ticker"], group_keys=False).apply(interpolate_group)
     return od
 
-# old method for add_FW_to_od, leads to the exact same forward rates ect. but takes ~133 times longer for 8 years. Scales very poorly O(n^3) i think
-    # import sys
-    # import time
-    #
-    # # Calculate forwards FW
-    # start_time = time.time()
-    # for current_date in od["date"].unique():
-    #     FW_date = FW[FW["date"] == current_date]
-    #     od_index = od["date"] == current_date  # Store index for efficient updates
-    #     tickers_date = od.loc[od_index, "ticker"].unique()
-    #
-    #     for current_ticker in tickers_date:
-    #         FW_ticker = FW_date[FW_date["ticker"] == current_ticker]
-    #         ticker_index = od_index & (od["ticker"] == current_ticker)
-    #         days_ticker = od.loc[ticker_index, "days"].unique()
-    #
-    #         for days in days_ticker:
-    #             F = vp.interpolated_FW(FW_ticker, days)
-    #             od.loc[ticker_index & (od["days"] == days), "F"] = F  # Update in-place
-    #
-    #     # print timing
-    #     elapsed_time = time.time() - start_time
-    #     sys.stdout.write(f"\rFW: Running date: {current_date} | Tickers: {len(tickers_date)} | Time elapsed: {elapsed_time:.2f} seconds")
-    #     sys.stdout.flush()
+
+
+from functools import partial
+import concurrent.futures
+import pandas as pd
+import numpy as np
+
+
+def compute_rates_for_date(group, ZCY_curves):
+    current_date = group["date"].iloc[0]
+    # Compute the yield curve for the current date once
+    ZCY_date = interpolate_yield_curve_between_dates(ZCY_curves, current_date)
+    ZCY_date = ZCY_date.sort_values("days")
+    x = ZCY_date["days"].values
+    y = ZCY_date["rate"].values
+
+    # Get the target 'days' values for this group
+    target_days = group["days"].values
+    interpolated_rates = np.empty_like(target_days, dtype=float)
+
+    # Masks for in-range, below-range, and above-range target days
+    mask_in_range = (target_days >= x[0]) & (target_days <= x[-1])
+    mask_below = target_days < x[0]
+    mask_above = target_days > x[-1]
+
+    # For in-range values, use numpy's vectorized interpolation
+    interpolated_rates[mask_in_range] = np.interp(target_days[mask_in_range], x, y)
+
+    # For target days below the minimum, extrapolate using the first two points
+    if np.any(mask_below):
+        x0, x1 = x[0], x[1]
+        y0, y1 = y[0], y[1]
+        interpolated_rates[mask_below] = y0 + (y1 - y0) * (target_days[mask_below] - x0) / (x1 - x0)
+
+    # For target days above the maximum, extrapolate using the last two points
+    if np.any(mask_above):
+        x0, x1 = x[-2], x[-1]
+        y0, y1 = y[-2], y[-1]
+        interpolated_rates[mask_above] = y0 + (y1 - y0) * (target_days[mask_above] - x0) / (x1 - x0)
+
+    group["r"] = interpolated_rates
+    return group
+
+
+def add_r_to_od_parallel(od, ZCY_curves, max_workers=None):
+    # Split the DataFrame into groups based on 'date'
+    groups = [group for _, group in od.groupby("date", group_keys=False)]
+
+    # Use ProcessPoolExecutor to parallelize processing of each group
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+        # Create a partial function to include ZCY_curves as an argument
+        compute_func = partial(compute_rates_for_date, ZCY_curves=ZCY_curves)
+        results = list(executor.map(compute_func, groups))
+
+    # Recombine the groups into a single DataFrame
+    return pd.concat(results)
 
 
 def add_r_to_od(od, ZCY_curves):
@@ -282,7 +314,43 @@ def process_group_activity_summary(group):
 
     return group, summary
 
+import concurrent.futures
+import load_clean_lib
 
+
+def process_group_activity_summary_wrapper(args):
+    # args is a tuple: ((current_date, current_ticker), group)
+    key, group = args
+    current_date, current_ticker = key
+    proc_group, summary = process_group_activity_summary(group)
+    summary["date"] = current_date
+    summary["ticker"] = current_ticker
+    return proc_group, summary
+
+def od_filter_and_summary_creater(od):
+
+    # Create a list of (key, group) tuples from the DataFrame
+    pairs = list(od.groupby(["date", "ticker"]))
+
+    # Use ProcessPoolExecutor to process groups in parallel
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        results = list(executor.map(process_group_activity_summary_wrapper, pairs))
+
+    # Separate the processed groups and summary information
+    processed_groups = [res[0] for res in results]
+    summary_list = [res[1] for res in results]
+
+    # Recombine all groups back into the od DataFrame
+    od = pd.concat(processed_groups)
+
+    # Update summary_dly_df (indexed by (ticker, date)) using the gathered summary information
+    summary_df = pd.DataFrame(summary_list).set_index(["ticker", "date"])
+
+    # Make dataset for results for each day for each asset
+    summary_dly_df = load_clean_lib.summary_dly_df_creator(od)
+    summary_dly_df.update(summary_df)
+
+    return od, summary_dly_df
 
 
 def interpolate_yield_curve_between_dates(ZCY_curves, date):
@@ -313,33 +381,6 @@ def interpolate_yield_curve_between_dates(ZCY_curves, date):
     return ZCY_date
 
 
-# def interpolate_yield_curve_between_dates(ZCY_curves, date):
-#     # Find the nearest dates before and after the target date
-#     next_date_val = ZCY_curves[ZCY_curves['date'] >= date].head(1)['date'].iloc[0]
-#     prev_date_val = ZCY_curves[ZCY_curves['date'] <= date].tail(1)['date'].iloc[0]
-#
-#     next_Curve = ZCY_curves[ZCY_curves['date'] == next_date_val]
-#     prev_Curve = ZCY_curves[ZCY_curves['date'] == prev_date_val]
-#
-#     # Create a DataFrame with unique "days" values
-#     valid_days = set(next_Curve['days']).union(set(prev_Curve['days']))
-#     ZCY_date = pd.DataFrame({'days': sorted(valid_days)})
-#     ZCY_date['date'] = date
-#
-#     # Calculate the time differences in days
-#     next_date_diff = (next_date_val - date) / np.timedelta64(1, 'D')
-#     prev_date_diff = (date - prev_date_val) / np.timedelta64(1, 'D')
-#     total_diff = (next_date_val - prev_date_val) / np.timedelta64(1, 'D')
-#
-#     # Define a function to interpolate rate for a given "days" value
-#     def interpolate_rate(days):
-#         next_rate = interpolated_ZCY(next_Curve, days)
-#         prev_rate = interpolated_ZCY(prev_Curve, days)
-#         return (next_rate * prev_date_diff + prev_rate * next_date_diff) / total_diff
-#
-#     # Apply the interpolation function to each "days" value
-#     ZCY_date['rate'] = ZCY_date['days'].apply(interpolate_rate)
-#     return ZCY_date
 
 def interpolated_ZCY(ZCY_date, target_days, date = None, filter_date = True):
     # Filter the DataFrame for the given date
@@ -414,26 +455,12 @@ def interpolated_FW(FW_date, target_days, date = None, ticker=None, filter_date 
 from tqdm import tqdm
 
 
-# def process_od_rdy(od_rdy, calc_func, n_points=200):
-#     from functools import partial
-#
-#     # Create a new function with n_points set to 200
-#     calc_func_cust = partial(calc_func, n_points=n_points)
-#
-#     # Group by the unique combination of ticker, date, and days
-#     grouped = list(od_rdy.groupby(["ticker", "date", "days"], group_keys=False))
-#
-#     # Initialize tqdm for progress tracking
-#     results = []
-#     for key, group in tqdm(grouped, total=len(grouped), desc="Processing Groups"):
-#         results.append(calc_func_cust(group))
-#
-#     # Combine results into a single DataFrame
-#     return pd.concat(results)
-
 def fill_swap_rates(summary_dly_df, od_rdy, n_points=200):
     # 1) Calculate var_swap_rate on od_rdy
-    df_swaps = process_od_rdy(od_rdy, replicate_SW, n_points=n_points)
+    # df_swaps = process_od_rdy(od_rdy, replicate_SW, n_points=n_points)
+    # Use the parallel version to calculate var_swap_rate
+    df_swaps = process_od_rdy_parallel(od_rdy, replicate_SW, n_points=n_points)
+
 
     # 2) Extract low/high rows and merge
     df_low = (
@@ -456,7 +483,36 @@ def fill_swap_rates(summary_dly_df, od_rdy, n_points=200):
     # 3) Update summary_dly_df
     summary_dly_df.update(df_merged[["low SW", "high SW"]])
 
+
+    T = 30
+    t = 0
+    T1 = summary_dly_df["low days"]
+    T2 = summary_dly_df["high days"]
+    SW1 = summary_dly_df["low SW"]
+    SW2 = summary_dly_df["high SW"]
+
+    summary_dly_df["SW"] = (1 / (T - t)) * (SW1 * (T1 - t) * (T2 - T) + SW2 * (T2 - t) * (T - T1)) / (T2 - T1)
+
     return summary_dly_df
+
+
+def process_od_rdy_worker(args):
+    group, calc_func, kwargs = args
+    return calc_func(group, **kwargs)
+
+
+def process_od_rdy_parallel(od_rdy, calc_func, **kwargs):
+    # Group by unique combination of ticker, date, and days
+    groups = [group for _, group in od_rdy.groupby(["ticker", "date", "days"], group_keys=False)]
+    worker_args = [(group, calc_func, kwargs) for group in groups]
+
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        results = list(tqdm(
+            executor.map(process_od_rdy_worker, worker_args),
+            total=len(worker_args),
+            desc="Processing Groups"
+        ))
+    return pd.concat(results)
 
 
 def process_od_rdy(od_rdy, calc_func, **kwargs):
@@ -473,24 +529,6 @@ def process_od_rdy(od_rdy, calc_func, **kwargs):
 
 
 from scipy.stats import norm
-
-
-def BSM_call_put(F, K, T, sigma, r, is_call=True):
-    """
-    Black–Scholes price for a European call or put.
-    is_call=True => call, is_call=False => put
-    """
-    if T <= 0 or sigma <= 0 or K <= 0:
-        return 0.0
-
-    d1 = (np.log(F / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-    d2 = d1 - sigma * np.sqrt(T)
-    call_price = np.exp(-r * T) * (F * norm.cdf(d1) - K * norm.cdf(d2))
-    if is_call:
-        return call_price
-    else:
-        # put-call parity: Put = Call - e^{-rT}(F-K)
-        return call_price - np.exp(-r * T) * (F - K)
 
 
 def replicate_SW(group, n_points = 100):
@@ -541,12 +579,12 @@ def replicate_SW(group, n_points = 100):
 
     # 5) Compute out-of-the-money option prices:
     #    Cal if K>F and put else: only out-of-the-money options are used.
-    option_prices = []
-    for K_val, sigma_val in zip(K_grid, iv_grid):
-        is_call = (K_val > F)  # True => call, False => put
-        price = BSM_call_put(F, K_val, T, sigma_val, r, is_call=is_call)
-        option_prices.append(price)
-    option_prices = np.array(option_prices)
+    is_call = (K_grid > F)  # Boolean array for call/put decision
+    d1 = (np.log(F / K_grid) + (r + 0.5 * iv_grid ** 2) * T) / (iv_grid * np.sqrt(T))
+    d2 = d1 - iv_grid * np.sqrt(T)
+    call_prices = np.exp(-r * T) * (F * norm.cdf(d1) - K_grid * norm.cdf(d2))
+    put_prices = call_prices - np.exp(-r * T) * (F - K_grid)
+    option_prices = np.where(is_call, call_prices, put_prices)
 
     # 6) Approximate the variance swap rate by numerical integration over K:
     #    The continuous-time formula is roughly:
@@ -573,59 +611,3 @@ def replicate_SW(group, n_points = 100):
 
     return group
 
-
-# def BSM_Spot(S, K, T, sigma, r, delta, type):
-#     d1 = (np.log(S/K) + (r - delta + 0.5*sigma**2)*T)/(sigma*np.sqrt(T))
-#     d2 = d1 - sigma*np.sqrt(T)
-#     C = S*np.exp(-delta*T)*norm.cdf(d1) - K*np.exp(-r*T)*norm.cdf(d2)
-#     if type == "C":
-#         return C
-#     if type == "P":
-#         return C - S *np.exp(-delta*T) + K *np.exp(-r*T)
-#     print("BSM error: Did not choose 'C' or 'P'")
-#     return np.NAN
-#
-#
-# def BSM_FW(F, K, T, sigma, r, type):
-#     d1 = (np.log(F/K) + (0.5*sigma**2)*T)/(sigma*np.sqrt(T))
-#     d2 = d1 - sigma*np.sqrt(T)
-#     C = np.exp(-r*T) * (F*norm.cdf(d1) - K*norm.cdf(d2))
-#     if type == "C":
-#         return C
-#     if type == "P":
-#         return C - F + K *np.exp(-r*T)
-#     print("BSM error: Did not choose 'C' or 'P'")
-#     return np.NAN
-#
-#
-# def BSM_FW_simple(FW_curves, K, T, sigma, ZCY_curves, type, date):
-#     # date = datetime.strptime(date, '%Y_%m_%d')
-#     F = interpolated_FW(FW_curves, date, T)
-#     r = interpolated_ZCY(ZCY_curves, date, T)
-#
-#     d1 = (np.log(F/K) + (0.5*sigma**2)*T)/(sigma*np.sqrt(T))
-#     d2 = d1 - sigma*np.sqrt(T)
-#     C = np.exp(-r*T) * (F*norm.cdf(d1) - K*norm.cdf(d2))
-#     if type == "C":
-#         return C
-#     if type == "P":
-#         return C - F + K *np.exp(-r*T)
-#     print("BSM error: Did not choose 'C' or 'P'")
-#     return np.NAN
-#
-#
-#
-# def BSM_FW_single(F, K, T, sigma, r, cp_flag):
-#     d1 = (np.log(F/K) + (r + 0.5*sigma**2)*T)/(sigma*np.sqrt(T))
-#     d2 = d1 - sigma*np.sqrt(T)
-#     C = np.exp(-r*T) * (F*norm.cdf(d1) - K*norm.cdf(d2))
-#     if cp_flag == "C":
-#         return C
-#     if cp_flag == "P":
-#         return C - (F - K) *np.exp(-r*T)
-#     print("BSM error: Did not choose 'C' or 'P'")
-#     return np.NAN
-
-
-
-# BSM = BSM_FW_single # selected as BSM
