@@ -18,39 +18,25 @@ def dirs(profile):
     return dir
 
 
-def load_od_FW_ZCY(profile, dataset):
-
+def load_od_FW_ZCY(profile, data_folder = "i4s4", tickers = None):
     dir = dirs(profile)
 
     # Define the i4s4 data files and their loaders (excluding ZCY_curve)
-    i4s4_files_and_loaders = {
-        "od": (dir["i4s4"] / "option data.csv", vp.load_option_data),  # Option data on i4s4 (4 index, 4 stocks)
-        # "RV": (dir["i4s4"] / "realized vol.csv", vp.load_realized_volatility),
-        # "IV": (dir["i4s4"] / "implied vol.csv", vp.load_implied_volatility),
-        "FW": (dir["i4s4"] / "forward price.csv", vp.load_forward_price),  # Forward data on i4s4
-        "ret": (dir["i4s4"] / "returns and stock price.csv", vp.load_returns_and_price)
+    files_and_loaders = {
+        "od": (dir[data_folder] / "option data.csv", vp.load_option_data),  # Option data on i4s4 (4 index, 4 stocks)
+        # "RV": (dir[data_folder] / "realized vol.csv", vp.load_realized_volatility),
+        # "IV": (dir[data_folder] / "implied vol.csv", vp.load_implied_volatility),
+        "FW": (dir[data_folder] / "forward price.csv", vp.load_forward_price),  # Forward data on i4s4
+        "ret": (dir[data_folder] / "returns and stock price.csv", vp.load_returns_and_price)
     }
 
     # Load all i4s4 data into a dictionary
-    i4s4 = {name: loader(path) for name, (path, loader) in i4s4_files_and_loaders.items()}
+    data = {name: loader(path) for name, (path, loader) in files_and_loaders.items()}
+
+    if tickers is not None:
+        data = {key: df[df["ticker"].isin(tickers)] for key, df in data.items()}
+
     ZCY_curves = vp.load_ZC_yield_curve(dir["CarrWu"] / "ZC yield curve.csv")
-
-    # Filter SPX data for each i4s4 dataset and create a new sp500 dictionary
-    sp500 = {key: df[df["ticker"] == "SPX"] for key, df in i4s4.items()}  # 1 index (sp500): identical to loading just sp500!
-    i1s1 = {key: df[(df["ticker"] == "SPX") | (df["ticker"] == "AMZN")] for key, df in i4s4.items()}  # 1 index, 1 stock
-    i2s1 = {key: df[(df["ticker"] == "SPX") | (df["ticker"] == "OEX") | (df["ticker"] == "AMZN")] for key, df in i4s4.items()}  # 2 index, 1 stock
-
-    if dataset == "sp500" or dataset == "i1s0":
-        data = sp500
-    elif dataset == "i4s4":
-        data = i4s4
-    elif dataset == "i1s1":
-        data = i1s1
-    elif dataset == "i2s1":
-        data = i2s1
-    else:
-        print("Error: choose a viable dataset such as 'i4s4' or 'sp500'. Default is nan.")
-        data = np.nan
 
     return data["od"], data["FW"], ZCY_curves, data["ret"]
 
