@@ -186,23 +186,33 @@ def calc_realized_var(returns_and_prices, first_day, last_day):
         (returns_and_prices['date'] >= first_day) & (returns_and_prices['date'] <= last_day_ret)
     ].copy()
 
+    #logreturns
+    returns_and_prices['log_return'] = np.log(1 + returns_and_prices['return'])
+    returns_and_prices['squared_log_return'] = returns_and_prices['log_return'] ** 2
+    
     def sum_next_30_days(group):
         group = group.sort_values(by='date')
         rv_list = []
         active_days_list = []
+        rv_om_list = []  # New list for RV_OM
 
         for i, row in group.iterrows():
             current_date = row['date']
             end_date = current_date + pd.Timedelta(days=30)
             mask = (group['date'] >= current_date) & (group['date'] < end_date)
             window_data = group.loc[mask]
-            rv_sum = window_data['squared_return'].sum()
+            rv_sum = window_data['squared_return'].sum() #squared_log_return v squared_return
             active_days = window_data.shape[0]
             rv_list.append(rv_sum)
             active_days_list.append(active_days)
+            
+            # OM mehtod to calc RV
+            rv_om = window_data['log_return'].std() * np.sqrt(21) # * np.sqrt(252)  # Annualize for at matche OM DATA
+            rv_om_list.append(rv_om)
 
         result = pd.DataFrame({
-            'RV': rv_list,
+            'RV_unscaled': rv_list,
+            'RV_OM': rv_om_list,
             'N_tradingdays': active_days_list
         }, index=group.index)
         return result
@@ -214,7 +224,9 @@ def calc_realized_var(returns_and_prices, first_day, last_day):
     )
 
     # Use .loc to set the new columns
-    returns_and_prices.loc[:, 'RV_scaled'] = result_df['RV'] * (252 / result_df['N_tradingdays'])
+    # returns_and_prices.loc[:, 'RV_unscaled'] = result_df['RV_unscaled']
+    returns_and_prices.loc[:, 'RV'] = result_df['RV_unscaled'] * (252 / result_df['N_tradingdays'])
+    returns_and_prices.loc[:, 'RV_OM'] = result_df['RV_OM'] 
     returns_and_prices.loc[:, 'N_tradingdays'] = result_df['N_tradingdays']
 
     # Filter again and explicitly copy the DataFrame
@@ -230,8 +242,9 @@ def calc_realized_var(returns_and_prices, first_day, last_day):
         ~((returns_and_prices['ticker'] == 'AMZN') & (returns_and_prices['date'] < pd.to_datetime("1997-11-19")))
     ].copy()
 
-    returns_and_prices["RV"] = returns_and_prices["RV_scaled"]
-    returns_and_prices.drop(['RV_scaled'], axis=1) # todo: make this always RV instead of new column and then rename and remove scaled
+    # returns_and_prices["RV"] = returns_and_prices["RV_scaled"]
+    # returns_and_prices.drop(['RV_scaled'], axis=1) # todo: make this always RV instead of new column and then rename and remove scaled
+    returns_and_prices.drop(['log_return', 'squared_log_return'], axis=1, inplace=True)
 
     return returns_and_prices
 
