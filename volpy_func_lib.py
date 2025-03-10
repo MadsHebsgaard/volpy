@@ -703,3 +703,72 @@ def replicate_SW(group, n_points = 100):
 
     return group
 
+
+import matplotlib.pyplot as plt
+
+def plot_diff_akk(df, tickers, from_date=None, to_date=None):
+    """
+    Plots the accumulated difference (diff_akk) as a function of date for one or more tickers.
+
+    Parameters:
+        df (pd.DataFrame): The DataFrame containing the data.
+        tickers (str or list): A single ticker symbol (e.g., 'SPX') or a list of ticker symbols (e.g., ['SPX', 'AAPL']).
+        from_date (str, optional): Start date for the plot (format: 'YYYY-MM-DD'). If not provided, the earliest date for the tickers is used.
+        to_date (str, optional): End date for the plot (format: 'YYYY-MM-DD'). If not provided, the latest date for the tickers is used.
+    """
+
+    #filter and calculating "returns"
+    df = df[df['Active']==True].copy()
+    df.loc[:, 'diff'] = (df['SW'] - df['RV'])
+    df.loc[:,'diff_akk'] = df.groupby('ticker')['diff'].cumsum()
+
+    if isinstance(tickers, str):
+        tickers = [tickers]
+
+    # Create a new plot
+    plt.figure(figsize=(12, 6))  # Set the size of the plot
+
+    # Define a list of colors for different tickers
+    colors = ['b', 'r', 'g', 'c', 'm', 'y', 'k']  # Blue, Red, Green, Cyan, Magenta, Yellow, Black
+
+    # Loop through each ticker and plot its data
+    for i, ticker in enumerate(tickers):
+        # Filter data for the selected ticker
+        ticker_data = df[df['ticker'] == ticker].copy()
+
+        # If from_date is not provided, use the earliest date for the ticker
+        if from_date is None:
+            ticker_from_date = ticker_data['Date'].min()
+        else:
+            ticker_from_date = pd.to_datetime(from_date)  # Convert to datetime if provided
+
+        # If to_date is not provided, use the latest date for the ticker
+        if to_date is None:
+            ticker_to_date = ticker_data['Date'].max()
+        else:
+            ticker_to_date = pd.to_datetime(to_date)  # Convert to datetime if provided
+
+        # Filter data for the selected date range
+        filtered_data = ticker_data[(ticker_data['Date'] >= ticker_from_date) & (ticker_data['Date'] <= ticker_to_date)]
+
+        # Plot 'diff_akk' as a function of 'Date' (thin line, no markers)
+        plt.plot(filtered_data['Date'], filtered_data['diff_akk'], linestyle='-', linewidth=1, color=colors[i % len(colors)], label=ticker)
+
+    # Add titles and labels
+    plt.title('Accumulated Difference (SW - RV) Over Time', fontsize=16)
+    plt.xlabel('Date', fontsize=14)
+    plt.ylabel('Accumulated Difference (diff_akk)', fontsize=14)
+
+    # Rotate x-axis date labels for better readability
+    plt.xticks(rotation=45)
+
+    # Add grid for better readability
+    plt.grid(True, linestyle='--', alpha=0.7)
+
+    # Add a legend to distinguish between tickers
+    plt.legend()
+
+    # Display the plot
+    plt.tight_layout()  # Ensure everything fits in the plot
+    plt.show()
+
