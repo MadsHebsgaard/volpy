@@ -3,8 +3,8 @@ import numpy as np
 
 
 
+
 def CarrWu_order(df):
-    # Order tickers according to the paper
     ticker_order = [
         "SPX", "OEX", "DJX", "NDX", "QQQ", "MSFT", "INTC", "IBM", "AMER",
         "DELL", "CSCO", "GE", "CPQ", "YHOO", "SUNW", "MU", "MO", "AMZN",
@@ -12,11 +12,22 @@ def CarrWu_order(df):
         "MOT", "EMC", "HWP", "AMGN", "BRCM", "MER", "NOK", "CHL", "UNPH",
         "EBAY", "JNPR", "CIEN", "BRCD"
     ]
-    # Convert the 'Ticker' column to a categorical type with the defined ordering
-    df['Ticker'] = pd.Categorical(df['Ticker'], categories=ticker_order, ordered=True)
-    # Sort the dataframe based on the ordered 'Ticker' column
-    df_ordered = df.sort_values('Ticker')
+    # Create a mapping from ticker to its order
+    order_dict = {ticker: idx for idx, ticker in enumerate(ticker_order)}
+
+    # Map each ticker in the DataFrame to its order; tickers not in ticker_order become NaN.
+    df['sort_order'] = df['Ticker'].map(order_dict)
+
+    # Replace NaN (tickers not in ticker_order) with a value that puts them after the defined tickers.
+    df['sort_order'] = df['sort_order'].fillna(len(ticker_order))
+
+    # Now sort by this order
+    df_ordered = df.sort_values('sort_order')
+
+    # Optionally, drop the auxiliary sort column if it's no longer needed
+    df_ordered = df_ordered.drop(columns=['sort_order'])
     return df_ordered
+
 
 def CarrWu2009_table_1(summary_dly_df, print_latex=False):
     # 1. Convert index to columns:

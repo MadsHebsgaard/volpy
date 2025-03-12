@@ -7,19 +7,21 @@ def dirs(profile):
     if profile == "Mads":
         Option_metrics_path = Path(r"D:\Finance Data\OptionMetrics")
     elif profile == "Axel":
-        Option_metrics_path = Path(r"C:\Users\axell\Desktop\CBS\data\OptionMetrics") 
+        Option_metrics_path = Path(r"C:\Users\axell\Desktop\CBS\data\OptionMetrics")
     dir = {
         "OptionMetrics": Option_metrics_path,
         "CarrWu": Option_metrics_path / "1996-2003 (CarrWu2009)",
         # "sp500": Option_metrics_path / "1996-2003 (CarrWu2009)" / "sp500",
         "i4s4": Option_metrics_path / "1996-2003 (CarrWu2009)" / "i4s4",
         "i91": Option_metrics_path / "1996-2003 (CarrWu2009)" / "i91",
+        "US ZOO": Option_metrics_path / "1996-2003 (CarrWu2009)" / "US ZOO",
     }
     return dir
 
 
 def load_od_FW_ZCY(profile, data_folder = "i4s4", tickers = None):
     dir = dirs(profile)
+
 
     # Define the i4s4 data files and their loaders (excluding ZCY_curve)
     files_and_loaders = {
@@ -36,7 +38,8 @@ def load_od_FW_ZCY(profile, data_folder = "i4s4", tickers = None):
     if tickers is not None:
         data = {key: df[df["ticker"].isin(tickers)] for key, df in data.items()}
 
-    ZCY_curves = vp.load_ZC_yield_curve(dir["CarrWu"] / "ZC yield curve.csv")
+    ZCY_curves = vp.load_ZC_yield_curve(dir["CarrWu"] / "ZC yield curve Full.csv")
+    ZCY_curves = ZCY_curves[ZCY_curves["date"] <= data["od"]["date"].max()]
 
     return data["od"], data["FW"], ZCY_curves, data["ret"]
 
