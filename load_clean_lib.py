@@ -15,6 +15,7 @@ def dirs(profile):
         "i4s4": Option_metrics_path / "1996-2003 (CarrWu2009)" / "i4s4",
         "i91": Option_metrics_path / "1996-2003 (CarrWu2009)" / "i91",
         "US ZOO": Option_metrics_path / "1996-2003 (CarrWu2009)" / "US ZOO",
+        "i2s1 full": Option_metrics_path / "1996-2003 (CarrWu2009)" / "i2s1 full",
     }
     return dir
 
@@ -70,7 +71,7 @@ def summary_dly_df_creator(od):
     unique_tickers = od["ticker"].unique()
 
     # Initialize the data structure
-    index = pd.MultiIndex.from_product([unique_tickers, unique_dates], names=["Ticker", "Date"])
+    index = pd.MultiIndex.from_product([unique_tickers, unique_dates], names=["ticker", "date"])
     summary_dly_df = pd.DataFrame(index=index,
                                   columns=["#days", "low days", "high days", "low #K", "high #K", "#K", "low SW", "high SW", "Active",
                                            "Inactive reason"])

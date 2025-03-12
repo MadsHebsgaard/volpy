@@ -2,9 +2,7 @@ import pandas as pd
 import numpy as np
 
 
-
-
-def CarrWu_order(df):
+def CarrWu_tickers():
     ticker_order = [
         "SPX", "OEX", "DJX", "NDX", "QQQ", "MSFT", "INTC", "IBM", "AMER",
         "DELL", "CSCO", "GE", "CPQ", "YHOO", "SUNW", "MU", "MO", "AMZN",
@@ -12,11 +10,15 @@ def CarrWu_order(df):
         "MOT", "EMC", "HWP", "AMGN", "BRCM", "MER", "NOK", "CHL", "UNPH",
         "EBAY", "JNPR", "CIEN", "BRCD"
     ]
+    return ticker_order
+
+def CarrWu_order(df):
+    ticker_order = CarrWu_tickers()
     # Create a mapping from ticker to its order
     order_dict = {ticker: idx for idx, ticker in enumerate(ticker_order)}
 
     # Map each ticker in the DataFrame to its order; tickers not in ticker_order become NaN.
-    df['sort_order'] = df['Ticker'].map(order_dict)
+    df['sort_order'] = df['ticker'].map(order_dict)
 
     # Replace NaN (tickers not in ticker_order) with a value that puts them after the defined tickers.
     df['sort_order'] = df['sort_order'].fillna(len(ticker_order))
@@ -33,19 +35,19 @@ def CarrWu2009_table_1(summary_dly_df, print_latex=False):
     # 1. Convert index to columns:
     # df = summary_dly_df.reset_index()
     df = summary_dly_df
-    # Now 'Date' and 'Ticker' are columns in df.
+    # Now 'date' and 'ticker' are columns in df.
 
-    # 2. Filter out rows where SW is NaN:
-    df_nonan = df[df["SW"].notna()]
+    # 2. Filter out rows where SW_0_30 is NaN:
+    df_nonan = df[df["SW_0_30"].notna()]
 
-    # 3. Group by Ticker and aggregate:
+    # 3. Group by ticker and aggregate:
     table_df = (
         df_nonan
-        .groupby("Ticker")
+        .groupby("ticker")
         .agg(
-            Starting_date=("Date", "min"),
-            Ending_date=("Date", "max"),
-            N=("SW", "count"),
+            Starting_date=("date", "min"),
+            Ending_date=("date", "max"),
+            N=("SW_0_30", "count"),
             NK=("#K", "mean")  # adjust aggregation if needed
         )
         .reset_index()
@@ -70,9 +72,9 @@ def CarrWu2009_table_1(summary_dly_df, print_latex=False):
 
 
     latex_code = table_df.to_latex(
-        columns=["Ticker", "Starting_date", "Ending_date", "N", "NK"],
+        columns=["ticker", "Starting_date", "Ending_date", "N", "NK"],
         index=False,
-        header=["Ticker", "Starting date", "Ending date", "N", "NK"],
+        header=["ticker", "Starting date", "Ending date", "N", "NK"],
         float_format="%.2f"
     )
 
@@ -86,10 +88,10 @@ def CarrWu2009_table_2(summary_dly_df, print_latex=False):
     """
     Creates a summary DataFrame with two panels:
       - Panel A: Realized variance, RV×100
-      - Panel B: Variance swap rate, SW×100
+      - Panel B: Variance swap rate, SW_0_30×100
     Columns calculated in each panel: Mean, Std. dev., Auto, Skew, Kurt.
     """
-    # Convert index to columns if Ticker is in the index
+    # Convert index to columns if ticker is in the index
     df = summary_dly_df
 
     def compute_stats(sub_df, col):
@@ -104,23 +106,23 @@ def CarrWu2009_table_2(summary_dly_df, print_latex=False):
         })
 
     # --- Panel A: Realized variance (RV) ---
-    df_rv = df[df["RV"].notna()].groupby("Ticker") \
+    df_rv = df[df["RV"].notna()].groupby("ticker") \
         .apply(lambda g: compute_stats(g, "RV")) \
         .reset_index()
 
     # Rename columns so we can distinguish them before merging
-    df_rv.columns = ["Ticker", "Mean_RV", "Std_RV", "Auto_RV", "Skew_RV", "Kurt_RV"]
+    df_rv.columns = ["ticker", "Mean_RV", "Std_RV", "Auto_RV", "Skew_RV", "Kurt_RV"]
 
-    # --- Panel B: Variance swap rate (SW) ---
-    df_sw = df[df["SW"].notna()].groupby("Ticker") \
-        .apply(lambda g: compute_stats(g, "SW")) \
+    # --- Panel B: Variance swap rate (SW_0_30) ---
+    df_sw = df[df["SW_0_30"].notna()].groupby("ticker") \
+        .apply(lambda g: compute_stats(g, "SW_0_30")) \
         .reset_index()
 
-    df_sw.columns = ["Ticker", "Mean_SW", "Std_SW", "Auto_SW", "Skew_SW", "Kurt_SW"]
+    df_sw.columns = ["ticker", "Mean_SW", "Std_SW", "Auto_SW", "Skew_SW", "Kurt_SW"]
 
-    # Merge realized variance and swap rate stats on Ticker
-    # Use how="inner" so we only keep tickers that have both RV and SW
-    out = pd.merge(df_rv, df_sw, on="Ticker", how="inner")
+    # Merge realized variance and swap rate stats on ticker
+    # Use how="inner" so we only keep tickers that have both RV and SW_0_30
+    out = pd.merge(df_rv, df_sw, on="ticker", how="inner")
 
     out = CarrWu_order(out)
 
@@ -135,13 +137,13 @@ def CarrWu2009_table_2_latex(table_df):
     """
     Prints a LaTeX-formatted table with multi-level headers:
       - Panel A: Realized variance, RV×100
-      - Panel B: Variance swap rate, SW×100
+      - Panel B: Variance swap rate, SW_0_30×100
     Each panel has Mean, Std. dev., Auto, Skew, Kurt.
     """
     # Reorder columns
     table_df = table_df[
         [
-            "Ticker",
+            "ticker",
             "Mean_RV", "Std_RV", "Auto_RV", "Skew_RV", "Kurt_RV",
             "Mean_SW", "Std_SW", "Auto_SW", "Skew_SW", "Kurt_SW"
         ]
@@ -149,7 +151,7 @@ def CarrWu2009_table_2_latex(table_df):
 
     # Create multi-level column headers
     table_df.columns = pd.MultiIndex.from_tuples([
-        ("", "Ticker"),
+        ("", "ticker"),
         ("Panel A: Realized variance, RV×100", "Mean"),
         ("Panel A: Realized variance, RV×100", "Std. dev."),
         ("Panel A: Realized variance, RV×100", "Auto"),
@@ -218,16 +220,16 @@ def newey_west_t_stat(series, lag=30):
 def CarrWu2009_table_3(summary_dly_df, print_latex=False):
     """
     Creates a summary DataFrame with two panels:
-      - Panel A: (RV - SW) x 100
-      - Panel B: ln(RV / SW)
+      - Panel A: (RV - SW_0_30) x 100
+      - Panel B: ln(RV / SW_0_30)
 
-    For each panel, the following statistics are computed per Ticker:
+    For each panel, the following statistics are computed per ticker:
       - Mean, Std. dev., Auto (lag-1 autocorrelation), Skew, Kurt,
         and t, where t is the Newey–West adjusted t-statistic (lag=30).
 
     Parameters:
       summary_dly_df : pd.DataFrame
-          The original DataFrame. It must include columns "RV", "SW", and "Ticker".
+          The original DataFrame. It must include columns "RV", "SW_0_30", and "ticker".
       print_latex : bool, default False
           If True, the function will print the LaTeX code for the table.
 
@@ -235,15 +237,15 @@ def CarrWu2009_table_3(summary_dly_df, print_latex=False):
       out : pd.DataFrame
           The merged summary statistics DataFrame.
     """
-    # Ensure Ticker is a column
+    # Ensure ticker is a column
     df = summary_dly_df
 
-    # Keep only rows where both RV and SW are present
-    df_nonan = df.dropna(subset=["RV", "SW"]).copy()
+    # Keep only rows where both RV and SW_0_30 are present
+    df_nonan = df.dropna(subset=["RV", "SW_0_30"]).copy()
 
     # Create new columns:
-    df_nonan["diff"] = df_nonan["RV"] - df_nonan["SW"]  # (RV - SW)
-    df_nonan["lnratio"] = np.log(df_nonan["RV"]) - np.log(df_nonan["SW"])  # ln(RV/SW)
+    df_nonan["diff"] = df_nonan["RV"] - df_nonan["SW_0_30"]  # (RV - SW_0_30)
+    df_nonan["lnratio"] = np.log(df_nonan["RV"]) - np.log(df_nonan["SW_0_30"])  # ln(RV/SW_0_30)
 
     # Helper function to compute statistics including Newey-West adjusted t-stat
     def compute_stats(series):
@@ -262,32 +264,32 @@ def CarrWu2009_table_3(summary_dly_df, print_latex=False):
             "t": t_
         })
 
-    # Panel A: (RV - SW) x 100 (scale diff by 100)
+    # Panel A: (RV - SW_0_30) x 100 (scale diff by 100)
     df_diff = (
         df_nonan
-        .groupby("Ticker", group_keys=False)
+        .groupby("ticker", group_keys=False)
         .apply(lambda g: compute_stats(g["diff"] * 100))
         .reset_index()
     )
     df_diff.columns = [
-        "Ticker",
+        "ticker",
         "Mean_diff", "Std_diff", "Auto_diff", "Skew_diff", "Kurt_diff", "t_diff"
     ]
 
-    # Panel B: ln(RV / SW)
+    # Panel B: ln(RV / SW_0_30)
     df_ln = (
         df_nonan
-        .groupby("Ticker", group_keys=False)
+        .groupby("ticker", group_keys=False)
         .apply(lambda g: compute_stats(g["lnratio"]))
         .reset_index()
     )
     df_ln.columns = [
-        "Ticker",
+        "ticker",
         "Mean_ln", "Std_ln", "Auto_ln", "Skew_ln", "Kurt_ln", "t_ln"
     ]
 
-    # Merge the two panels on Ticker
-    out = pd.merge(df_diff, df_ln, on="Ticker", how="inner")
+    # Merge the two panels on ticker
+    out = pd.merge(df_diff, df_ln, on="ticker", how="inner")
 
     out = CarrWu_order(out)
 
@@ -300,8 +302,8 @@ def CarrWu2009_table_3(summary_dly_df, print_latex=False):
 def CarrWu2009_table_3_latex(table_df):
     """
     Prints a LaTeX-formatted table with multi-level headers:
-      - Panel A: (RV - SW) x 100
-      - Panel B: ln(RV / SW)
+      - Panel A: (RV - SW_0_30) x 100
+      - Panel B: ln(RV / SW_0_30)
 
     Each panel displays:
       Mean, Std. dev., Auto, Skew, Kurt, and t (Newey–West adjusted).
@@ -309,7 +311,7 @@ def CarrWu2009_table_3_latex(table_df):
     # Reorder columns for clarity
     table_df = table_df[
         [
-            "Ticker",
+            "ticker",
             "Mean_diff", "Std_diff", "Auto_diff", "Skew_diff", "Kurt_diff", "t_diff",
             "Mean_ln", "Std_ln", "Auto_ln", "Skew_ln", "Kurt_ln", "t_ln"
         ]
@@ -317,7 +319,7 @@ def CarrWu2009_table_3_latex(table_df):
 
     # Create multi-level column headers
     table_df.columns = pd.MultiIndex.from_tuples([
-        ("", "Ticker"),
+        ("", "ticker"),
         ("Panel A: (RV - SW) x 100", "Mean"),
         ("Panel A: (RV - SW) x 100", "Std. dev."),
         ("Panel A: (RV - SW) x 100", "Auto"),
