@@ -20,7 +20,7 @@ def load_option_data(file_path):
         # "index_flag",
         # "forward_price",
         # "exercise_style",
-        "secid"
+        # "secid"
     ]
 
     # Load only the specified columns
@@ -114,9 +114,7 @@ def load_forward_price(file_path):
     df['ticker'] = df['ticker'].astype('string')
     df['date'] = pd.to_datetime(df['date'], format='%Y-%m-%d', errors='coerce')
     df['expiration'] = pd.to_datetime(df['expiration'], format='%Y-%m-%d', errors='coerce')
-
     df["days"] = (df['expiration'] - df['date']).dt.days
-
     return df
 
 def load_returns_and_price(file_path):
@@ -548,11 +546,18 @@ from tqdm import tqdm
 
 
 def fill_swap_rates(summary_dly_df, od_rdy, n_points=200):
+    summary_dly_df = high_low_swap_rates(summary_dly_df, od_rdy, n_points=n_points)
+    summary_dly_df = interpolate_swaps_and_returns(summary_dly_df)
+    return summary_dly_df
+
+
+def high_low_swap_rates(summary_dly_df, od_rdy, n_points=200):
     # 1) Calculate var_swap_rate on od_rdy
     # df_swaps = process_od_rdy(od_rdy, replicate_SW, n_points=n_points)
     # Use the parallel version to calculate var_swap_rate
     df_swaps = process_od_rdy_parallel(od_rdy, replicate_SW, n_points=n_points)
 
+    summary_dly_df = summary_dly_df.set_index(["ticker", "date"])
 
     # 2) Extract low/high rows and merge
     df_low = (
@@ -573,9 +578,12 @@ def fill_swap_rates(summary_dly_df, od_rdy, n_points=200):
     df_merged.set_index(["ticker", "date"], inplace=True)
 
     # 3) Update summary_dly_df
-    summary_dly_df.update(df_merged[["low SW", "high SW"]])
+    # summary_dly_df.update(df_merged[["low SW", "high SW"]])
+    summary_dly_df.loc[df_merged.index, ["low SW", "high SW"]] = df_merged[["low SW", "high SW"]]
 
+    return summary_dly_df
 
+def interpolate_swaps_and_returns(summary_dly_df):
     T = 30
     t = 0
     T1 = summary_dly_df["low days"]
@@ -583,10 +591,33 @@ def fill_swap_rates(summary_dly_df, od_rdy, n_points=200):
     SW1 = summary_dly_df["low SW"]
     SW2 = summary_dly_df["high SW"]
 
-    summary_dly_df["SW"] = (1 / (T - t)) * (SW1 * (T1 - t) * (T2 - T) + SW2 * (T2 - t) * (T - T1)) / (T2 - T1)
+    summary_dly_df["SW_0_30"] = (1 / (T - t)) * (SW1 * (T1 - t) * (T2 - T) + SW2 * (T2 - t) * (T - T1)) / (T2 - T1)
+    summary_dly_df["SW_m1_29"] = summary_dly_df.groupby("ticker")["SW_0_30"].shift(1)
+    summary_dly_df["SW_0_29"] = (1 / (T - (t + 1))) * (SW1 * (T1 - (t + 1)) * (T2 - T) + SW2 * (T2 - (t + 1)) * (T - T1)) / (T2 - T1)
+    # summary_dly_df["SW_1_30"] = summary_dly_df.groupby("ticker")["SW_0_29"].shift(-1)
+
+    summary_dly_df["SW_return_day"] = (1 / 30) * (summary_dly_df["squared_return"] + 29 * summary_dly_df["SW_0_29"] - 30 * summary_dly_df["SW_m1_29"])
+    # summary_dly_df["SW_return_day_scaled"] = summary_dly_df["SW_return_day"] / summary_dly_df["SW_m1_29"]
 
     return summary_dly_df
 
+
+def add_realized_vol_to_summary(summary_dly_df, real_vol):
+    # Reset index so that 'date' and 'ticker' become columns
+    summary_dly_df_reset = summary_dly_df.reset_index()
+
+    # Merge by specifying left_on and right_on keys
+    merged_df = summary_dly_df_reset.merge(
+        real_vol[['date', 'ticker', 'RV', 'open', 'squared_return']],
+        left_on=['date', 'ticker'],
+        right_on=['date', 'ticker'],
+        how='left'
+    )
+
+    # Optionally, set the index back to ['date', 'ticker']
+    summary_dly_df = merged_df.set_index(['date', 'ticker'])
+    summary_dly_df = summary_dly_df.reset_index()
+    return summary_dly_df
 
 def process_od_rdy_worker(args):
     group, calc_func, kwargs = args
@@ -743,25 +774,25 @@ def plot_diff_akk(df, tickers, from_date=None, to_date=None, logreturn=False):
 
         # If from_date is not provided, use the earliest date for the ticker
         if from_date is None:
-            ticker_from_date = ticker_data['Date'].min()
+            ticker_from_date = ticker_data['date'].min()
         else:
             ticker_from_date = pd.to_datetime(from_date)  # Convert to datetime if provided
 
         # If to_date is not provided, use the latest date for the ticker
         if to_date is None:
-            ticker_to_date = ticker_data['Date'].max()
+            ticker_to_date = ticker_data['date'].max()
         else:
             ticker_to_date = pd.to_datetime(to_date)  # Convert to datetime if provided
 
         # Filter data for the selected date range
-        filtered_data = ticker_data[(ticker_data['Date'] >= ticker_from_date) & (ticker_data['Date'] <= ticker_to_date)]
+        filtered_data = ticker_data[(ticker_data['date'] >= ticker_from_date) & (ticker_data['date'] <= ticker_to_date)]
 
-        # Plot 'diff_akk' as a function of 'Date' (thin line, no markers)
-        plt.plot(filtered_data['Date'], filtered_data['diff_akk'], linestyle='-', linewidth=1, color=colors[i % len(colors)], label=ticker)
+        # Plot 'diff_akk' as a function of 'date' (thin line, no markers)
+        plt.plot(filtered_data['date'], filtered_data['diff_akk'], linestyle='-', linewidth=1, color=colors[i % len(colors)], label=ticker)
 
     # Add titles and labels
     plt.title('Accumulated Difference (SW - RV) Over Time', fontsize=16)
-    plt.xlabel('Date', fontsize=14)
+    plt.xlabel('date', fontsize=14)
     plt.ylabel('Accumulated Difference (diff_akk)', fontsize=14)
 
     # Rotate x-axis date labels for better readability
