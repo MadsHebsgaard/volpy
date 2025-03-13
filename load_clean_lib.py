@@ -93,7 +93,7 @@ def summary_dly_df_creator(od):
     return summary_dly_df
 
 
-def load_clean_and_prepare_od(data_folder, profile="Mads", tickers=None, first_day=None, last_day=None):
+def load_clean_and_prepare_od(data_folder, profile="Mads", tickers=None, first_day=None, last_day=None, IV_type = "od"):
     # load data
     od, FW, ZCY_curves, returns_and_prices = load_od_FW_ZCY(profile, data_folder, tickers=tickers)
 
@@ -114,11 +114,12 @@ def load_clean_and_prepare_od(data_folder, profile="Mads", tickers=None, first_d
 
     # add IV_bid/IV_mid/IV_ask to options
     od = vp.add_bid_mid_ask_IV(od)
+    od["IV"] = od[f"IV_{IV_type}"]
 
     return od, returns_and_prices
 
 
-def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None, IV_types = ["om"]):
+def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None):
     if first_day is None:   first_day = od["date"].min()
     if last_day is None:    last_day = od["date"].max()
 
@@ -134,6 +135,6 @@ def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None,
     # only keep the lowest ("low") and the second lowest ("high") TTMs
     od_rdy = od[(od["low"] == True) | (od["high"] == True)]
 
-    summary_dly_df = vp.fill_swap_rates(summary_dly_df, od_rdy, n_points=200, IV_types = IV_types)
+    summary_dly_df = vp.fill_swap_rates(summary_dly_df, od_rdy, n_points=200)
 
     return summary_dly_df, od_rdy
