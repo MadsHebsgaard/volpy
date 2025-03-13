@@ -98,24 +98,49 @@ def load_realized_volatility(file_path):
     return df
 
 
+# def load_forward_price(file_path):
+#     columns_to_load = [
+#         "secid",
+#         "ticker",
+#         "date",
+#         "expiration",
+#         "ForwardPrice"
+#     ]
+
+#     # Load only the specified columns
+#     df = pd.read_csv(file_path, usecols=columns_to_load)
+
+#     # Format columns
+#     df['ticker'] = df['ticker'].astype('string')
+#     df['date'] = pd.to_datetime(df['date'], format='%Y-%m-%d', errors='coerce')
+#     df['expiration'] = pd.to_datetime(df['expiration'], format='%Y-%m-%d', errors='coerce')
+#     df["days"] = (df['expiration'] - df['date']).dt.days
+#     return df
+
+
 def load_forward_price(file_path):
-    columns_to_load = [
-        "secid",
-        "ticker",
-        "date",
-        "expiration",
-        "ForwardPrice"
-    ]
+    df = pd.read_csv(file_path)
 
-    # Load only the specified columns
-    df = pd.read_csv(file_path, usecols=columns_to_load)
+    # Ensret kolonnenavne til små bogstaver
+    df.columns = df.columns.str.lower()
 
-    # Format columns
-    df['ticker'] = df['ticker'].astype('string')
-    df['date'] = pd.to_datetime(df['date'], format='%Y-%m-%d', errors='coerce')
-    df['expiration'] = pd.to_datetime(df['expiration'], format='%Y-%m-%d', errors='coerce')
-    df["days"] = (df['expiration'] - df['date']).dt.days
+    # Omdøb "forwardprice" til "ForwardPrice" (med stort F og P), hvis nødvendigt
+    if "forwardprice" in df.columns:
+        df.rename(columns={"forwardprice": "ForwardPrice"}, inplace=True)
+
+    # Behold kun de nødvendige kolonner
+    df = df[["secid", "ticker", "date", "expiration", "ForwardPrice"]]
+
+    # Formatér kolonner
+    df["ticker"] = df["ticker"].astype("string")
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["expiration"] = pd.to_datetime(df["expiration"], errors="coerce")
+
+    # Beregn "days"
+    df["days"] = (df["expiration"] - df["date"]).dt.days
+
     return df
+
 
 def load_returns_and_price(file_path):
     # Read the CSV file into a DataFrame
@@ -557,8 +582,9 @@ def high_low_swap_rates(summary_dly_df, od_rdy, n_points=200):
     # Use the parallel version to calculate var_swap_rate
     df_swaps = process_od_rdy_parallel(od_rdy, replicate_SW, n_points=n_points)
 
-    summary_dly_df = summary_dly_df.set_index(["ticker", "date"])
-
+    if summary_dly_df.index.names != ["ticker", "date"]:
+        summary_dly_df = summary_dly_df.set_index(["ticker", "date"])
+        
     # 2) Extract low/high rows and merge
     df_low = (
         df_swaps[df_swaps["low"]]
