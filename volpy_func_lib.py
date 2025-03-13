@@ -27,6 +27,9 @@ def load_option_data(file_path):
     df = pd.read_csv(file_path, usecols=columns_to_load)
 
     df.rename(columns={"strike_price": "K"}, inplace=True)
+    df.rename(columns={"best_bid": "bid"}, inplace=True)
+    df.rename(columns={"best_offer": "ask"}, inplace=True)
+    df.rename(columns={"impl_volatility": "IV_om"}, inplace=True)
 
     # Format columns
     df['date'] = pd.to_datetime(df['date'], format='%Y-%m-%d', errors='coerce')
@@ -342,6 +345,60 @@ def add_r_to_od(od, ZCY_curves):
     od = od.groupby("date", group_keys=False).apply(compute_rates_for_date)
     return od
 
+def vectorized_iv(F, K, T, market_price, cp_flag, tol=1e-6, max_iter=100):
+    sigma = np.full_like(F, 0.2, dtype=float)
+    for _ in range(max_iter):
+        # Clip sigma to remain within a reasonable range
+        sigma = np.clip(sigma, 1e-6, 5.0)
+        sqrt_T = np.sqrt(T)
+
+        # Compute d1 and d2 safely; note that for T==0 we set d1=0
+        d1 = np.where(T > 0, (np.log(F / K) + 0.5 * sigma ** 2 * T) / (sigma * sqrt_T), 0)
+        d2 = d1 - sigma * sqrt_T
+
+        # Compute the Black option price vectorized over F, K, T and sigma
+        price = np.where(
+            T <= 0,
+            np.where(cp_flag == "C", np.maximum(0.0, F - K), np.maximum(0.0, K - F)),
+            np.where(cp_flag == "C",
+                     F * norm.cdf(d1) - K * norm.cdf(d2),
+                     K * norm.cdf(-d2) - F * norm.cdf(-d1))
+        )
+
+        # Compute Vega (the derivative with respect to sigma)
+        vega = np.where(T <= 0, 0.0, F * norm.pdf(d1) * sqrt_T)
+        diff = price - market_price
+
+        # If converged for all, break out
+        if np.all(np.abs(diff) < tol):
+            break
+
+        # Update sigma only where vega is nonzero
+        mask = vega != 0
+        update = np.zeros_like(sigma)
+        update[mask] = diff[mask] / vega[mask]
+
+        # Clip the update step to avoid huge jumps that can cause overflow
+        update = np.clip(update, -1, 1)
+        sigma[mask] = sigma[mask] - update[mask]
+
+    # Assign NaN to any negative volatility values
+    sigma = np.where(sigma < 0, np.nan, sigma)
+    return sigma
+
+
+def add_bid_mid_ask_IV(od):
+    # Prepare the inputs from your DataFrame
+    T = od["days"].values / 365.0
+    F = od["F"].values
+    K = od["K"].values
+    cp_flag = od["cp_flag"].values  # Assumes an array of "C" and "P"
+
+    # Compute IV_bid vectorized
+    for price in ["bid", "mid", "ask"]:
+        market_price = od[price].values
+        od[f"IV_{price}"] = vectorized_iv(F, K, T, market_price, cp_flag)
+    return od
 
 def process_group_activity_summary(group):
     # Extract the current date and ticker from the group
@@ -545,17 +602,18 @@ def interpolated_FW(FW_date, target_days, date = None, ticker=None, filter_date 
 from tqdm import tqdm
 
 
-def fill_swap_rates(summary_dly_df, od_rdy, n_points=200):
-    summary_dly_df = high_low_swap_rates(summary_dly_df, od_rdy, n_points=n_points)
+def fill_swap_rates(summary_dly_df, od_rdy, n_points=200, IV_types = ["om"]):
+    # for IV_type in IV_types:
+    summary_dly_df = high_low_swap_rates(summary_dly_df, od_rdy, n_points=n_points) #, IV_types = IV_type
     summary_dly_df = interpolate_swaps_and_returns(summary_dly_df)
     return summary_dly_df
 
 
-def high_low_swap_rates(summary_dly_df, od_rdy, n_points=200):
+def high_low_swap_rates(summary_dly_df, od_rdy, n_points=200, IV_type = "om"):
     # 1) Calculate var_swap_rate on od_rdy
     # df_swaps = process_od_rdy(od_rdy, replicate_SW, n_points=n_points)
     # Use the parallel version to calculate var_swap_rate
-    df_swaps = process_od_rdy_parallel(od_rdy, replicate_SW, n_points=n_points)
+    df_swaps = process_od_rdy_parallel(od_rdy, replicate_SW, IV_type = IV_type, n_points=n_points)
 
     summary_dly_df = summary_dly_df.set_index(["ticker", "date"])
 
@@ -624,7 +682,7 @@ def process_od_rdy_worker(args):
     return calc_func(group, **kwargs)
 
 
-def process_od_rdy_parallel(od_rdy, calc_func, **kwargs):
+def process_od_rdy_parallel(od_rdy, calc_func, IV_type, **kwargs):
     # Group by unique combination of ticker, date, and days
     groups = [group for _, group in od_rdy.groupby(["ticker", "date", "days"], group_keys=False)]
     worker_args = [(group, calc_func, kwargs) for group in groups]
@@ -651,8 +709,6 @@ def process_od_rdy(od_rdy, calc_func, **kwargs):
     return pd.concat(results)
 
 
-from scipy.stats import norm
-
 
 def replicate_SW(group, n_points = 100):
     """
@@ -672,7 +728,7 @@ def replicate_SW(group, n_points = 100):
 
     # 1) Average implied volatility as a rough stdev estimate
     #    (This is the "standard deviation" used to define ±8 stdev range.)
-    avg_iv = group["impl_volatility"].mean()
+    avg_iv = group["IV_om"].mean()
     stdev = avg_iv * np.sqrt(T)
 
     # 2) Convert strikes to moneyness k = ln(K/F)
@@ -683,7 +739,7 @@ def replicate_SW(group, n_points = 100):
 
     # Arrays of available moneyness and implied vol
     K_data = group["K"].values
-    iv_data = group["impl_volatility"].values
+    iv_data = group["IV_om"].values
 
     # 3) Define a fine moneyness grid ±8 stdevs from 0 (i.e. from -8*stdev to +8*stdev)
     k_min = -8 * stdev

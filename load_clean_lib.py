@@ -48,13 +48,14 @@ def load_od_FW_ZCY(profile, data_folder = "i4s4", tickers = None):
 
 
 def clean_od(od, first_day = pd.to_datetime("1996-01-04"), last_day = pd.to_datetime("2003-02-28")):
-    # od = od.dropna(subset=["K", "impl_volatility", "cp_flag"])
+    # od = od.dropna(subset=["K", "IV_om", "cp_flag"])
     # od = od[od["days"] <= 365]
-    od["spread"] = od["best_offer"] - od["best_bid"]
+    od["spread"] = od["ask"] - od["bid"]
+    od["mid"] = od["bid"] + od["spread"] / 2
     od = (
         od
-        .dropna(subset=["K", "impl_volatility", "cp_flag"])
-        .query("days <= 365 and spread > 0 and best_bid > 0")
+        .dropna(subset=["K", "IV_om", "cp_flag"])
+        .query("days <= 365 and spread > 0 and bid > 0")
     )
     # od = od[od["volume"] > 5000]
 
@@ -89,3 +90,49 @@ def summary_dly_df_creator(od):
     summary_dly_df["Inactive reason"] = "missing"
 
     return summary_dly_df
+
+
+def load_clean_and_prepare_od(data_folder, profile="Mads", tickers=None, first_day=None, last_day=None):
+    # load data
+    od, FW, ZCY_curves, returns_and_prices = load_od_FW_ZCY(profile, data_folder, tickers=tickers)
+
+    if first_day is None:   first_day = od["date"].min()
+    if last_day is None:    last_day = od["date"].max()
+
+    # clean data (should be looked upon)
+    od = clean_od(od, first_day=first_day, last_day=last_day)
+
+    # add forward
+    od = vp.add_FW_to_od(od, FW)
+
+    # remove if ITM
+    od = od.loc[((od["F"] < od["K"]) & (od["cp_flag"] == "C")) | ((od["F"] > od["K"]) & (od["cp_flag"] == "P"))]
+
+    # add r to options
+    od = vp.add_r_to_od_parallel(od, ZCY_curves)
+
+    # add IV_bid/IV_mid/IV_ask to options
+    od = vp.add_bid_mid_ask_IV(od)
+
+    return od, returns_and_prices
+
+
+def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None, IV_types = ["om"]):
+    if first_day is None:   first_day = od["date"].min()
+    if last_day is None:    last_day = od["date"].max()
+
+    # Add low/high and create summary (Filters dataset for criteria such as min 3 strikes ... min 8 days...)
+    od, summary_dly_df = vp.od_filter_and_summary_creater(od)
+
+    # Realized vol calculation
+    real_vol = vp.calc_realized_var(returns_and_prices, first_day, last_day)
+
+    # Merge realized vol with summary_dly_df
+    summary_dly_df = vp.add_realized_vol_to_summary(summary_dly_df, real_vol)
+
+    # only keep the lowest ("low") and the second lowest ("high") TTMs
+    od_rdy = od[(od["low"] == True) | (od["high"] == True)]
+
+    summary_dly_df = vp.fill_swap_rates(summary_dly_df, od_rdy, n_points=200, IV_types = IV_types)
+
+    return summary_dly_df, od_rdy
