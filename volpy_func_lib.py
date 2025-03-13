@@ -793,7 +793,7 @@ def replicate_SW(group, n_points = 100):
 
 import matplotlib.pyplot as plt
 
-def plot_diff_akk(df, tickers, from_date=None, to_date=None):
+def plot_diff_akk(df, tickers, from_date=None, to_date=None, logreturn=False):
     """
     Plots the accumulated difference (diff_akk) as a function of date for one or more tickers.
 
@@ -809,6 +809,11 @@ def plot_diff_akk(df, tickers, from_date=None, to_date=None):
     df.loc[:, 'diff'] = (df['SW'] - df['RV'])
     df.loc[:,'diff_akk'] = df.groupby('ticker')['diff'].cumsum()
 
+    if logreturn == True:
+        df.loc[:, 'diff'] = np.log(df['SW']  / df['RV'])/30 + 1
+        df.loc[:,'diff_akk'] = df.groupby('ticker')['diff'].cumprod() 
+
+    
     if isinstance(tickers, str):
         tickers = [tickers]
 
@@ -851,6 +856,8 @@ def plot_diff_akk(df, tickers, from_date=None, to_date=None):
 
     # Add grid for better readability
     plt.grid(True, linestyle='--', alpha=0.7)
+
+    if logreturn == True: plt.yscale('log')
 
     # Add a legend to distinguish between tickers
     plt.legend()
