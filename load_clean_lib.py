@@ -16,6 +16,7 @@ def dirs(profile):
         "i91": Option_metrics_path / "1996-2003 (CarrWu2009)" / "i91",
         "US ZOO": Option_metrics_path / "1996-2003 (CarrWu2009)" / "US ZOO",
         "i2s1 full": Option_metrics_path / "1996-2003 (CarrWu2009)" / "i2s1 full",
+        "axeltest":Option_metrics_path / "Axeltest",
     }
     return dir
 
