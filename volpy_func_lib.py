@@ -627,18 +627,17 @@ def interpolated_FW(FW_date, target_days, date = None, ticker=None, filter_date 
 from tqdm import tqdm
 
 
-def fill_swap_rates(summary_dly_df, od_rdy, n_points=200, IV_types = ["om"]):
-    # for IV_type in IV_types:
-    summary_dly_df = high_low_swap_rates(summary_dly_df, od_rdy, n_points=n_points) #, IV_types = IV_type
+def fill_swap_rates(summary_dly_df, od_rdy, n_points=200):
+    summary_dly_df = high_low_swap_rates(summary_dly_df, od_rdy, n_points=n_points)
     summary_dly_df = interpolate_swaps_and_returns(summary_dly_df)
     return summary_dly_df
 
 
-def high_low_swap_rates(summary_dly_df, od_rdy, n_points=200, IV_type = "om"):
+def high_low_swap_rates(summary_dly_df, od_rdy, n_points=200):
     # 1) Calculate var_swap_rate on od_rdy
     # df_swaps = process_od_rdy(od_rdy, replicate_SW, n_points=n_points)
     # Use the parallel version to calculate var_swap_rate
-    df_swaps = process_od_rdy_parallel(od_rdy, replicate_SW, IV_type = IV_type, n_points=n_points)
+    df_swaps = process_od_rdy_parallel(od_rdy, replicate_SW, n_points=n_points)
 
     if summary_dly_df.index.names != ["ticker", "date"]:
         summary_dly_df = summary_dly_df.set_index(["ticker", "date"])
@@ -708,7 +707,7 @@ def process_od_rdy_worker(args):
     return calc_func(group, **kwargs)
 
 
-def process_od_rdy_parallel(od_rdy, calc_func, IV_type, **kwargs):
+def process_od_rdy_parallel(od_rdy, calc_func, **kwargs):
     # Group by unique combination of ticker, date, and days
     groups = [group for _, group in od_rdy.groupby(["ticker", "date", "days"], group_keys=False)]
     worker_args = [(group, calc_func, kwargs) for group in groups]
@@ -754,7 +753,7 @@ def replicate_SW(group, n_points = 100):
 
     # 1) Average implied volatility as a rough stdev estimate
     #    (This is the "standard deviation" used to define ±8 stdev range.)
-    avg_iv = group["IV_om"].mean()
+    avg_iv = group["IV"].mean()
     stdev = avg_iv * np.sqrt(T)
 
     # 2) Convert strikes to moneyness k = ln(K/F)
@@ -765,7 +764,7 @@ def replicate_SW(group, n_points = 100):
 
     # Arrays of available moneyness and implied vol
     K_data = group["K"].values
-    iv_data = group["IV_om"].values
+    iv_data = group["IV"].values
 
     # 3) Define a fine moneyness grid ±8 stdevs from 0 (i.e. from -8*stdev to +8*stdev)
     k_min = -8 * stdev
