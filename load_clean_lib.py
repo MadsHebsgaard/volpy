@@ -137,3 +137,85 @@ def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None,
     summary_dly_df = vp.fill_swap_rates(summary_dly_df, od_rdy, n_points=n_grid)
 
     return summary_dly_df, od_rdy
+
+
+def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ"]):
+    import pandas as pd
+    import requests
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    # Load FF5 Daily Data
+    # https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html
+    url_ff5 = "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_5_Factors_2x3_daily_CSV.zip"
+    response_ff5 = requests.get(url_ff5)
+    zip_file_ff5 = ZipFile(BytesIO(response_ff5.content))
+    csv_filename_ff5 = zip_file_ff5.namelist()[0]
+
+    df = pd.read_csv(zip_file_ff5.open(csv_filename_ff5), skiprows=3)
+    df.rename(columns={'Unnamed: 0': 'date'}, inplace=True)
+    df.rename(columns={'Mkt-RF': 'Mkt'}, inplace=True)
+    # Keep only rows where date is an 8-digit string (YYYYMMDD)
+    df = df[df['date'].astype(str).str.match(r'^\d{8}$')]
+    df['date'] = pd.to_datetime(df['date'], format='%Y%m%d')
+    df.set_index('date', inplace=True)
+    df = df.apply(pd.to_numeric, errors='coerce')
+    df = df / 100
+
+    if "UMD" in Factor_list:
+        # Load Momentum (UMD) Daily Data
+        # https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html
+        url_mom = "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Momentum_Factor_daily_CSV.zip"
+        response_mom = requests.get(url_mom)
+        zip_file_mom = ZipFile(BytesIO(response_mom.content))
+        csv_filename_mom = zip_file_mom.namelist()[0]
+
+        df_mom = pd.read_csv(zip_file_mom.open(csv_filename_mom), skiprows=13)
+        df_mom.rename(columns={'Unnamed: 0': 'date'}, inplace=True)
+        df.rename(columns={'Mom': 'UMD'}, inplace=True)
+        df_mom = df_mom[df_mom['date'].astype(str).str.match(r'^\d{8}$')]
+        df_mom['date'] = pd.to_datetime(df_mom['date'], format='%Y%m%d')
+        df_mom.set_index('date', inplace=True)
+        df_mom = df_mom.apply(pd.to_numeric, errors='coerce')
+        df_mom = df_mom / 100
+
+        # Merge the datasets on the date index
+        # This will join the 5 factors with the momentum factor (UMD)
+        df = df.join(df_mom, how='inner')
+
+    if "BAB" in Factor_list:
+        # Add BAB
+        # Slow as not in .zip folder and a lot of data (~28MB)
+        # https://www.aqr.com/Insights/Datasets/Betting-Against-Beta-Equity-Factors-Daily
+        url_bab = "https://www.aqr.com/-/media/AQR/Documents/Insights/Data-Sets/Betting-Against-Beta-Equity-Factors-Daily.xlsx"
+
+        # Read the Excel file:
+        df_bab = pd.read_excel(url_bab, skiprows=18, usecols="A:AD", nrows=24914)
+
+        df_bab.rename(columns={'DATE': 'date'}, inplace=True)
+        df_bab['date'] = pd.to_datetime(df_bab['date'], format='%m/%d/%Y')
+        df = df.merge(df_bab[['date', 'USA']], on='date', how='left')
+        df.rename(columns={'USA': 'BAB'}, inplace=True)
+
+    if "QMJ" in Factor_list:
+        # Add QMJ
+        # Slow as not in .zip folder and a lot of data (~28MB)
+        # https://www.aqr.com/Insights/Datasets/Quality-Minus-Junk-Factors-Daily
+        url_qmj = "https://www.aqr.com/-/media/AQR/Documents/Insights/Data-Sets/Quality-Minus-Junk-Factors-Daily.xlsx"
+
+        # Read the Excel file:
+        df_qmj = pd.read_excel(url_qmj, skiprows=18, usecols="A:AD", nrows=17313)
+
+        df_qmj.rename(columns={'DATE': 'date'}, inplace=True)
+        df_qmj['date'] = pd.to_datetime(df_qmj['date'], format='%m/%d/%Y')
+        df = df.merge(df_qmj[['date', 'USA']], on='date', how='left')
+        df.rename(columns={'USA': 'QMJ'}, inplace=True)
+
+        columns_reordered = [col for col in df.columns if col != 'RF'] + ['RF']
+        df = df[columns_reordered]
+
+    return df
+
+def download_factors():
+    factor_df = download_factor_df()
+    factor_df.to_csv('data/factor_df.csv', index=False)
