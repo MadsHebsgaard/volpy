@@ -629,31 +629,46 @@ def fetch_stock_returns(db, begdate, enddate, tickers, csv_path):
 
 
 def fetch_wrds_data(db, profile, folder_name, begdate, enddate, tickers=None, data_types=["O", "F", "S"], return_df=False, progress=False):
+    """
+    Henter WRDS data (options, forward prices, stock returns) og gemmer i en mappe.
+    
+    Args:
+        db: WRDS databaseforbindelse
+        profile (str): Brugerprofil til mappehåndtering
+        folder_name (str): Navn på mappen til at gemme data
+        begdate (str): Startdato i 'YYYY-MM-DD' format
+        enddate (str): Slutdato i 'YYYY-MM-DD' format
+        tickers (list, optional): Liste over tickers
+        data_types (list, optional): Liste af datatyper ("O", "F", "S")
+        return_df (bool, optional): Returnerer dataframes hvis True
+        progress (bool, optional): Bruger progress-bar version af funktionerne hvis True
+
+    Returns:
+        dict: Dataframes som dictionary med keys "O", "F", "S" hvis return_df=True, ellers None
+    """
+
     # Find base directory for brugerprofil
     base_dir = load.dirs(profile)["OptionMetrics"] / folder_name
 
-    # Tjek om mappen allerede eksisterer
-    if base_dir.exists() and any(base_dir.iterdir()):  # Tjekker om mappen indeholder filer
+    # Tjek om mappen allerede eksisterer og indeholder filer
+    if base_dir.exists() and any(base_dir.iterdir()):
         print(f"Folder '{folder_name}' already exists. Aborting.")
         return None
 
     # Opret mappen, hvis den ikke findes
     base_dir.mkdir(parents=True, exist_ok=True)
 
-    # Hvis ingen specifikke data_types er angivet, hentes alle tre
-    if data_types is None:
-        data_types = ["O", "F", "S"]
-
-    # Funktioner og filnavne
+    # Mapping af funktioner og filnavne
     function_map = {
         "O": (fetch_options_data_progress if progress else fetch_options_data, "option data.csv"),
         "F": (fetch_forward_prices_progress if progress else fetch_forward_prices, "forward price.csv"),
         "S": (fetch_stock_returns_progress if progress else fetch_stock_returns, "returns and stock price.csv")
     }
 
-    # Dictionary til returnering af dataframes (kun hvis return_df=True)
-    data_results = {} if return_df else None
+    # Initialiser dictionary til dataframes
+    data_results = {}
 
+    # Hent de valgte datatyper
     for data_type in data_types:
         if data_type not in function_map:
             raise ValueError(f"data_type: {data_type} is not accepted. Use only 'O', 'F', 'S'.")
@@ -661,12 +676,14 @@ def fetch_wrds_data(db, profile, folder_name, begdate, enddate, tickers=None, da
         fetch_function, filename = function_map[data_type]
         csv_path = base_dir / filename  # Generer den rigtige filsti
 
-        # Hent data og gem i CSV
         print(f"Importing {data_type}-data and saving to: {csv_path}")
         df = fetch_function(db, begdate, enddate, tickers, csv_path)
 
+        # Hvis return_df=True, gem dataframe i dictionary
         if return_df:
             data_results[data_type] = df
 
     return data_results if return_df else None
+
+
 
