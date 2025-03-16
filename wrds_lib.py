@@ -60,9 +60,86 @@ from tqdm import tqdm
 #     return df
 
 
-def fetch_options_data_progress(db, begdate, enddate, tickers, csv_path):
+# def fetch_options_data_progress(db, begdate, enddate, tickers, csv_path):
+#     """
+#     Optimeret fetch_options_data_progress med en dynamisk progress bar (tqdm).
+    
+#     Args:
+#         db: WRDS databaseforbindelse
+#         begdate (str): Startdato i 'YYYY-MM-DD' format
+#         enddate (str): Slutdato i 'YYYY-MM-DD' format
+#         tickers (list): Liste af tickers
+#         csv_path (str): Sti til output CSV-fil
+#     """
+
+#     # Konverter datoer til SQL-format
+#     begdate_sql = f"'{begdate}'"
+#     enddate_sql = f"'{enddate}'"
+
+#     # Hent SECID'er for de valgte tickers
+#     secid_list = None
+#     if tickers:
+#         if isinstance(tickers, str):
+#             tickers = [tickers]
+
+#         secid_df = db.raw_sql(f"""
+#             SELECT secid, ticker, cusip, issuer
+#             FROM optionm.securd1
+#             WHERE ticker IN ({', '.join(f"'{t}'" for t in tickers)})
+#         """)
+
+#         secid_list = secid_df["secid"].tolist()
+
+#         if len(secid_list) == 1:
+#             secid_str = f"({secid_list[0]})"
+#         elif secid_list:
+#             secid_str = f"({', '.join(map(str, secid_list))})"
+#         else:
+#             secid_str = "(NULL)"
+
+#     # Definer start- og slutår baseret på begdate og enddate
+#     start_year = max(int(begdate[:4]), 1996)
+#     end_year = min(int(enddate[:4]) + 1, 2024)
+
+#     df_list = []
+
+#     # Opret progress bar
+#     with tqdm(total=end_year - start_year, desc="Collecting data", unit="years") as pbar:
+#         for year in range(start_year, end_year):
+#             query = f"""
+#                 SELECT o.secid, s.ticker, o.optionid, s.cusip, s.issuer, 
+#                        o.date, o.exdate, o.cp_flag, o.strike_price, 
+#                        o.best_bid, o.best_offer, o.impl_volatility, o.volume, o.open_interest,
+#                        o.cfadj, ss_flag,
+#                        (o.exdate - o.date) AS days_diff
+#                 FROM optionm.opprcd{year} o
+#                 LEFT JOIN optionm.securd1 s ON o.secid = s.secid
+#                 WHERE o.date BETWEEN {begdate_sql} AND {enddate_sql}
+#                   AND (o.exdate - o.date) > 8  
+#                   AND (o.exdate - o.date) <= 365
+#             """
+
+#             if secid_list:
+#                 query += f" AND o.secid IN {secid_str}"
+
+#             df_list.append(db.raw_sql(query, date_cols=["date", "exdate"]))
+
+#             # Opdater progress bar
+#             pbar.update(1)
+
+#     df = pd.concat(df_list, ignore_index=True)
+#     df.sort_values(by=["ticker", "date"], inplace=True)
+#     df.to_csv(csv_path, index=False)
+
+#     print(f"Data collected and saved: {len(df)} rows.")  
+#     # print(f"Data gemt til {csv_path}")
+#     return df
+
+
+
+def fetch_options_data_progress(db, begdate, enddate, tickers, csv_path, chunk_size, return_df):
     """
-    Optimeret fetch_options_data_progress med en dynamisk progress bar (tqdm).
+    Optimeret fetch_options_data_progress med chunking og en dynamisk progress bar (tqdm).
     
     Args:
         db: WRDS databaseforbindelse
@@ -70,6 +147,7 @@ def fetch_options_data_progress(db, begdate, enddate, tickers, csv_path):
         enddate (str): Slutdato i 'YYYY-MM-DD' format
         tickers (list): Liste af tickers
         csv_path (str): Sti til output CSV-fil
+        chunk_size (int): Størrelse af hvert chunk, der skal skrives til CSV-filen
     """
 
     # Konverter datoer til SQL-format
@@ -101,10 +179,9 @@ def fetch_options_data_progress(db, begdate, enddate, tickers, csv_path):
     start_year = max(int(begdate[:4]), 1996)
     end_year = min(int(enddate[:4]) + 1, 2024)
 
-    df_list = []
-
     # Opret progress bar
     with tqdm(total=end_year - start_year, desc="Collecting data", unit="years") as pbar:
+        first_chunk = True
         for year in range(start_year, end_year):
             query = f"""
                 SELECT o.secid, s.ticker, o.optionid, s.cusip, s.issuer, 
@@ -122,20 +199,106 @@ def fetch_options_data_progress(db, begdate, enddate, tickers, csv_path):
             if secid_list:
                 query += f" AND o.secid IN {secid_str}"
 
-            df_list.append(db.raw_sql(query, date_cols=["date", "exdate"]))
+            # Hent data i chunks ved at bruge LIMIT og OFFSET
+            offset = 0
+            while True:
+                chunk_query = query + f" LIMIT {chunk_size} OFFSET {offset}"
+                chunk = db.raw_sql(chunk_query, date_cols=["date", "exdate"])
+
+                if chunk.empty:
+                    break  # Stop, hvis der ikke er flere data
+
+                if first_chunk:
+                    # Skriv header kun for den første chunk
+                    chunk.to_csv(csv_path, index=False, mode='w')
+                    first_chunk = False
+                else:
+                    # Undlad at skrive header for efterfølgende chunks
+                    chunk.to_csv(csv_path, index=False, mode='a', header=False)
+
+                offset += chunk_size
 
             # Opdater progress bar
             pbar.update(1)
+    
+    print("Data collected and saved")
+    if return_df: return pd.read_csv(csv_path)
+    return
 
-    df = pd.concat(df_list, ignore_index=True)
-    df.sort_values(by=["ticker", "date"], inplace=True)
-    df.to_csv(csv_path, index=False)
 
-    print(f"Data collected and saved: {len(df)} rows.")  
-    # print(f"Data gemt til {csv_path}")
-    return df
 
-def fetch_options_data(db, begdate, enddate, tickers, csv_path):
+# def fetch_options_data(db, begdate, enddate, tickers, csv_path):
+#     # Konverter datoer til SQL-format
+#     begdate_sql = f"'{begdate}'"
+#     enddate_sql = f"'{enddate}'"
+
+#     # Hent SECID'er for de valgte tickers
+#     secid_list = None
+#     if tickers:
+#         if isinstance(tickers, str):
+#             tickers = [tickers]
+
+
+#         secid_df = db.raw_sql(f"""
+#             SELECT secid, ticker, cusip, issuer
+#             FROM optionm.securd1
+#             WHERE ticker IN ({', '.join(f"'{t}'" for t in tickers)})
+#         """)
+
+#         secid_list = secid_df["secid"].tolist()
+
+#         if len(secid_list) == 1:
+#             secid_str = f"({secid_list[0]})"
+#         elif secid_list:
+#             secid_str = f"({', '.join(map(str, secid_list))})"
+#         else:
+#             secid_str = "(NULL)"
+
+#     # Definer start- og slutår baseret på begdate og enddate
+#     start_year = max(int(begdate[:4]), 1996)
+#     end_year = min(int(enddate[:4]) + 1, 2024)
+
+#     # Opret en dynamisk UNION ALL-query direkte i SQL
+#     table_union_query = " UNION ALL ".join(
+#         [f"SELECT * FROM optionm.opprcd{year}" for year in range(start_year, end_year)]
+#     )
+
+#     final_query = f"""
+#         SELECT o.secid, s.ticker, o.optionid, s.cusip, s.issuer, 
+#                o.date, o.exdate, o.cp_flag, o.strike_price, 
+#                o.best_bid, o.best_offer, o.impl_volatility, o.volume, o.open_interest,
+#                o.cfadj, ss_flag,
+#                (o.exdate - o.date) AS days_diff
+#         FROM (
+#             {table_union_query}  -- Dynamisk UNION ALL af alle relevante årstabeller
+#         ) AS o
+#         LEFT JOIN optionm.securd1 AS s
+#         ON o.secid = s.secid
+#         WHERE o.date BETWEEN {begdate_sql} AND {enddate_sql}
+#           AND (o.exdate - o.date) > 8  
+#           AND (o.exdate - o.date) <= 365
+#     """
+
+#     if secid_list:
+#         final_query += f" AND o.secid IN {secid_str}"
+
+#     # Kør den samlede SQL-query
+#     try:
+#         df = db.raw_sql(final_query, date_cols=["date", "exdate"])
+#         print(f"Data collected and saved: {len(df)} rows.")
+#     except Exception as e:
+#         print(f"Error in data import: {e}")
+#         return None
+
+#     # Sortér og gem data
+#     df.sort_values(by=["ticker", "date"], inplace=True)
+#     df.to_csv(csv_path, index=False)
+
+#     return df
+
+
+
+def fetch_options_data(db, begdate, enddate, tickers, csv_path, chunk_size, return_df):
     # Konverter datoer til SQL-format
     begdate_sql = f"'{begdate}'"
     enddate_sql = f"'{enddate}'"
@@ -145,7 +308,6 @@ def fetch_options_data(db, begdate, enddate, tickers, csv_path):
     if tickers:
         if isinstance(tickers, str):
             tickers = [tickers]
-
 
         secid_df = db.raw_sql(f"""
             SELECT secid, ticker, cusip, issuer
@@ -190,20 +352,28 @@ def fetch_options_data(db, begdate, enddate, tickers, csv_path):
     if secid_list:
         final_query += f" AND o.secid IN {secid_str}"
 
-    # Kør den samlede SQL-query
-    try:
-        df = db.raw_sql(final_query, date_cols=["date", "exdate"])
-        print(f"Data collected and saved: {len(df)} rows.")
-    except Exception as e:
-        print(f"Error in data import: {e}")
-        return None
+    # Hent data i chunks
+    offset = 0
+    first_chunk = True
+    while True:
+        chunk_query = final_query + f" LIMIT {chunk_size} OFFSET {offset}"
+        chunk = db.raw_sql(chunk_query, date_cols=["date", "exdate"])
 
-    # Sortér og gem data
-    df.sort_values(by=["ticker", "date"], inplace=True)
-    df.to_csv(csv_path, index=False)
+        if chunk.empty:
+            break  # Stop, hvis der ikke er flere data
 
-    return df
+        if first_chunk:
+            # Skriv header kun for den første chunk
+            chunk.to_csv(csv_path, index=False, mode='w')
+            first_chunk = False
+        else:
+            # Undlad at skrive header for efterfølgende chunks
+            chunk.to_csv(csv_path, index=False, mode='a', header=False)
 
+        offset += chunk_size
+    print("Data collected and saved")
+    if return_df: return pd.read_csv(csv_path)
+    return
 
 
 
@@ -628,7 +798,7 @@ def fetch_stock_returns(db, begdate, enddate, tickers, csv_path):
 #     return Option_metrics_path
 
 
-def fetch_wrds_data(db, profile, folder_name, begdate, enddate, tickers=None, data_types=["O", "F", "S"], return_df=False, progress=False):
+def fetch_wrds_data(db, profile, folder_name, begdate, enddate, tickers=None, data_types=["O", "F", "S"], return_df=False, progress=False, chunk_size = 1500000):
     """
     Henter WRDS data (options, forward prices, stock returns) og gemmer i en mappe.
     
@@ -677,8 +847,10 @@ def fetch_wrds_data(db, profile, folder_name, begdate, enddate, tickers=None, da
         csv_path = base_dir / filename  # Generer den rigtige filsti
 
         print(f"Importing {data_type}-data and saving to: {csv_path}")
-        df = fetch_function(db, begdate, enddate, tickers, csv_path)
-
+        if data_type == "O":
+            df = fetch_function(db, begdate, enddate, tickers, csv_path, chunk_size=chunk_size, return_df=return_df)
+        else:
+            df = fetch_function(db, begdate, enddate, tickers, csv_path)
         # Hvis return_df=True, gem dataframe i dictionary
         if return_df:
             data_results[data_type] = df
