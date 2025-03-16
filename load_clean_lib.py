@@ -112,14 +112,13 @@ def load_clean_and_prepare_od(data_folder, profile="Mads", tickers=None, first_d
     # add r to options
     od = vp.add_r_to_od_parallel(od, ZCY_curves)
 
-    # add IV_bid/IV_mid/IV_ask to options
-    od = vp.add_bid_mid_ask_IV(od)
-    od["IV"] = od[f"IV_{IV_type}"]
+    # add IV to options (bid/ask/mid/om)
+    od["IV"] = vp.add_bid_mid_ask_IV(od, IV_type)
 
     return od, returns_and_prices
 
 
-def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None):
+def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None, n_grid=200):
     if first_day is None:   first_day = od["date"].min()
     if last_day is None:    last_day = od["date"].max()
 
@@ -135,6 +134,6 @@ def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None)
     # only keep the lowest ("low") and the second lowest ("high") TTMs
     od_rdy = od[(od["low"] == True) | (od["high"] == True)]
 
-    summary_dly_df = vp.fill_swap_rates(summary_dly_df, od_rdy, n_points=200)
+    summary_dly_df = vp.fill_swap_rates(summary_dly_df, od_rdy, n_points=n_grid)
 
     return summary_dly_df, od_rdy
