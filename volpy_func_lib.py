@@ -158,9 +158,6 @@ def load_returns_and_price(file_path):
     # Ensure the DataFrame is sorted
     returns_and_prices = returns_and_prices.sort_values(by=["ticker", "date"])
 
-    # Compute squared daily returns
-    returns_and_prices["squared_return"] = returns_and_prices["return"] ** 2
-
     # # Filtrer data for at inkludere kun rækker med datoer mellem first_day og last_day
     # first_day = pd.to_datetime("1996-01-04")
     # last_day = pd.to_datetime("2003-02-28") + pd.Timedelta(days=30)
@@ -211,6 +208,9 @@ def calc_realized_var(returns_and_prices, first_day, last_day):
     returns_and_prices = returns_and_prices[
         (returns_and_prices['date'] >= first_day) & (returns_and_prices['date'] <= last_day_ret)
     ].copy()
+
+    # Compute squared daily returns
+    returns_and_prices["squared_return"] = returns_and_prices["return"] ** 2
 
     #logreturns
     returns_and_prices['log_return'] = np.log(1 + returns_and_prices['return'])
@@ -412,18 +412,22 @@ def vectorized_iv(F, K, T, market_price, cp_flag, tol=1e-6, max_iter=100):
     return sigma
 
 
-def add_bid_mid_ask_IV(od):
+def add_bid_mid_ask_IV(od, IV_type):
+
+    # Compute IV_bid vectorized
+    if IV_type == "om":
+        return od["IV_om"]
+    else:
+        market_price = od[IV_type].values
+
     # Prepare the inputs from your DataFrame
     T = od["days"].values / 365.0
     F = od["F"].values
     K = od["K"].values
     cp_flag = od["cp_flag"].values  # Assumes an array of "C" and "P"
 
-    # Compute IV_bid vectorized
-    for price in ["bid", "mid", "ask"]:
-        market_price = od[price].values
-        od[f"IV_{price}"] = vectorized_iv(F, K, T, market_price, cp_flag)
-    return od
+    IV = vectorized_iv(F, K, T, market_price, cp_flag)
+    return IV
 
 def process_group_activity_summary(group):
     # Extract the current date and ticker from the group
@@ -679,7 +683,13 @@ def interpolate_swaps_and_returns(summary_dly_df):
     summary_dly_df["SW_0_29"] = (1 / (T - (t + 1))) * (SW1 * (T1 - (t + 1)) * (T2 - T) + SW2 * (T2 - (t + 1)) * (T - T1)) / (T2 - T1)
     # summary_dly_df["SW_1_30"] = summary_dly_df.groupby("ticker")["SW_0_29"].shift(-1)
 
-    summary_dly_df["SW_return_day"] = (1 / 30) * (summary_dly_df["squared_return"] + 29 * summary_dly_df["SW_0_29"] - 30 * summary_dly_df["SW_m1_29"])
+    buy_price = summary_dly_df["SW_m1_29"]
+    sell_price = (1/30) * (summary_dly_df["squared_return"] + 29 * summary_dly_df["SW_0_29"])
+    summary_dly_df["SW_day"] = sell_price - buy_price  # (1 / 30) * (summary_dly_df["squared_return"] + 29 * summary_dly_df["SW_0_29"] - 30 * summary_dly_df["SW_m1_29"])
+    summary_dly_df["SW_day_return"] = sell_price / buy_price - 1
+
+    summary_dly_df["SW_sell"] = sell_price
+    summary_dly_df["SW_buy"] = buy_price
     # summary_dly_df["SW_return_day_scaled"] = summary_dly_df["SW_return_day"] / summary_dly_df["SW_m1_29"]
 
     return summary_dly_df
@@ -769,7 +779,7 @@ def replicate_SW(group, n_points = 100):
     # 3) Define a fine moneyness grid ±8 stdevs from 0 (i.e. from -8*stdev to +8*stdev)
     k_min = -8 * stdev
     k_max = 8 * stdev
-    k_grid = np.linspace(k_min, k_max, n_points)  # 2000 points as per your spec
+    k_grid = np.linspace(k_min, k_max, n_points)  # 2000 points ect.
 
     # Convert moneyness back to strikes
     K_grid = F * np.exp(k_grid)
@@ -784,7 +794,8 @@ def replicate_SW(group, n_points = 100):
     # 5) Compute out-of-the-money option prices:
     #    Cal if K>F and put else: only out-of-the-money options are used.
     is_call = (K_grid > F)  # Boolean array for call/put decision
-    d1 = (np.log(F / K_grid) + (r + 0.5 * iv_grid ** 2) * T) / (iv_grid * np.sqrt(T))
+    # d1 = (np.log(F / K_grid) + (r + 0.5 * iv_grid ** 2) * T) / (iv_grid * np.sqrt(T)) # Not the forward method (r should be removed)
+    d1 = (np.log(F / K_grid) + 0.5 * iv_grid ** 2 * T) / (iv_grid * np.sqrt(T))
     d2 = d1 - iv_grid * np.sqrt(T)
     call_prices = np.exp(-r * T) * (F * norm.cdf(d1) - K_grid * norm.cdf(d2))
     put_prices = call_prices - np.exp(-r * T) * (F - K_grid)
