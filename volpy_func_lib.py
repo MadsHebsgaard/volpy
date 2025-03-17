@@ -685,8 +685,13 @@ def interpolate_swaps_and_returns(summary_dly_df):
 
     buy_price = summary_dly_df["SW_m1_29"]
     sell_price = (1/30) * (summary_dly_df["squared_return"] + 29 * summary_dly_df["SW_0_29"])
-    summary_dly_df["SW_day"] = sell_price - buy_price  # (1 / 30) * (summary_dly_df["squared_return"] + 29 * summary_dly_df["SW_0_29"] - 30 * summary_dly_df["SW_m1_29"])
-    summary_dly_df["SW_day_return"] = sell_price / buy_price - 1
+    RF = summary_dly_df["RF"]
+
+    summary_dly_df['SW_day'] = sell_price - (1 + RF) * buy_price
+    summary_dly_df["SW_day_no_RF"] = sell_price - buy_price
+
+    summary_dly_df["SW_day_return"] = sell_price / ((1 + RF) * buy_price) - 1
+    summary_dly_df['SW_day_return_ro_RF'] = sell_price / buy_price - 1
 
     summary_dly_df["SW_sell"] = sell_price
     summary_dly_df["SW_buy"] = buy_price

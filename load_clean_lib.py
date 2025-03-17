@@ -124,6 +124,11 @@ def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None,
 
     # Add low/high and create summary (Filters dataset for criteria such as min 3 strikes ... min 8 days...)
     od, summary_dly_df = vp.od_filter_and_summary_creater(od)
+    summary_dly_df.reset_index(inplace=True)
+
+    # Add risk-free rate of the given date
+    RF = download_factor_df(Factor_list=["FF5"])[['date', 'RF']]
+    summary_dly_df = summary_dly_df.merge(RF[['date', 'RF']], on='date', how='left')
 
     # Realized vol calculation
     real_vol = vp.calc_realized_var(returns_and_prices, first_day, last_day)
@@ -134,6 +139,7 @@ def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None,
     # only keep the lowest ("low") and the second lowest ("high") TTMs
     od_rdy = od[(od["low"] == True) | (od["high"] == True)]
 
+    # Calculate Swap Rates
     summary_dly_df = vp.fill_swap_rates(summary_dly_df, od_rdy, n_points=n_grid)
 
     return summary_dly_df, od_rdy
@@ -172,7 +178,7 @@ def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ"]):
 
         df_mom = pd.read_csv(zip_file_mom.open(csv_filename_mom), skiprows=13)
         df_mom.rename(columns={'Unnamed: 0': 'date'}, inplace=True)
-        df.rename(columns={'Mom': 'UMD'}, inplace=True)
+        df_mom.rename(columns={'Mom   ': 'UMD'}, inplace=True)
         df_mom = df_mom[df_mom['date'].astype(str).str.match(r'^\d{8}$')]
         df_mom['date'] = pd.to_datetime(df_mom['date'], format='%Y%m%d')
         df_mom.set_index('date', inplace=True)
@@ -214,6 +220,7 @@ def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ"]):
         columns_reordered = [col for col in df.columns if col != 'RF'] + ['RF']
         df = df[columns_reordered]
 
+    df.reset_index(inplace=True)
     return df
 
 def download_factors():
