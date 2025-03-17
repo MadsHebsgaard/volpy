@@ -221,8 +221,11 @@ def fetch_options_data_progress(db, begdate, enddate, tickers, csv_path, chunk_s
             # Opdater progress bar
             pbar.update(1)
     
-    print("Data collected and saved")
-    if return_df: return pd.read_csv(csv_path)
+    if return_df == False: print("Data collected and saved")
+    if return_df: 
+        df = pd.read_csv(csv_path)
+        print(f"Data collected and saved: {len(df)} rows.")
+        return df
     return
 
 
@@ -371,8 +374,11 @@ def fetch_options_data(db, begdate, enddate, tickers, csv_path, chunk_size, retu
             chunk.to_csv(csv_path, index=False, mode='a', header=False)
 
         offset += chunk_size
-    print("Data collected and saved")
-    if return_df: return pd.read_csv(csv_path)
+    if return_df == False: print("Data collected and saved")
+    if return_df: 
+        df = pd.read_csv(csv_path)
+        print(f"Data collected and saved: {len(df)} rows.")
+        return df
     return
 
 
@@ -773,6 +779,40 @@ def fetch_stock_returns(db, begdate, enddate, tickers, csv_path):
     return df
 
 
+
+
+def fetch_zerocoupons(db, begdate, enddate, csv_path):
+
+    # Konverter datoer til SQL-format
+    begdate_sql = f"'{begdate}'"
+    enddate_sql = f"'{enddate}'"
+
+    final_query = f"""
+        SELECT *
+        FROM optionm.zerocd
+        WHERE date BETWEEN {begdate_sql} AND {enddate_sql}
+        AND days <= 500
+    """
+
+    # Kør den samlede SQL-query
+    try:
+        df = db.raw_sql(final_query, date_cols=["date"])
+        print(f"Data collected and saved: {len(df)} rows.")   
+    except Exception as e:
+        print(f"Error in data import: {e}")
+        return None
+
+    # Sortér og gem data
+    df.sort_values(by=["date", "days"], inplace=True)
+    df.to_csv(csv_path, index=False)
+
+    return df
+
+
+
+
+
+
 # def fetch_wrds_data(begdate, enddate, tickers, data_type, csv_path):
 
 #     function_map = {
@@ -798,7 +838,7 @@ def fetch_stock_returns(db, begdate, enddate, tickers, csv_path):
 #     return Option_metrics_path
 
 
-def fetch_wrds_data(db, profile, folder_name, begdate, enddate, tickers=None, data_types=["O", "F", "S"], return_df=False, progress=False, chunk_size = 1500000):
+def fetch_wrds_data(db, profile, folder_name, begdate, enddate, tickers=None, data_types=["O", "F", "S", "Z"], return_df=False, progress=False, chunk_size = 1500000):
     """
     Henter WRDS data (options, forward prices, stock returns) og gemmer i en mappe.
     
@@ -832,7 +872,8 @@ def fetch_wrds_data(db, profile, folder_name, begdate, enddate, tickers=None, da
     function_map = {
         "O": (fetch_options_data_progress if progress else fetch_options_data, "option data.csv"),
         "F": (fetch_forward_prices_progress if progress else fetch_forward_prices, "forward price.csv"),
-        "S": (fetch_stock_returns_progress if progress else fetch_stock_returns, "returns and stock price.csv")
+        "S": (fetch_stock_returns_progress if progress else fetch_stock_returns, "returns and stock price.csv"),
+        "Z": (fetch_zerocoupons, "ZC yield curve.csv")
     }
 
     # Initialiser dictionary til dataframes
@@ -849,6 +890,8 @@ def fetch_wrds_data(db, profile, folder_name, begdate, enddate, tickers=None, da
         print(f"Importing {data_type}-data and saving to: {csv_path}")
         if data_type == "O":
             df = fetch_function(db, begdate, enddate, tickers, csv_path, chunk_size=chunk_size, return_df=return_df)
+        elif data_type == "Z":
+            df = fetch_function(db, begdate, enddate, csv_path)
         else:
             df = fetch_function(db, begdate, enddate, tickers, csv_path)
         # Hvis return_df=True, gem dataframe i dictionary
