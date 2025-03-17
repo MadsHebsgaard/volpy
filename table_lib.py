@@ -218,25 +218,6 @@ def newey_west_t_stat(series, lag=30):
 
 
 def CarrWu2009_table_3(summary_dly_df, print_latex=False):
-    """
-    Creates a summary DataFrame with two panels:
-      - Panel A: (RV - SW_0_30) x 100
-      - Panel B: ln(RV / SW_0_30)
-
-    For each panel, the following statistics are computed per ticker:
-      - Mean, Std. dev., Auto (lag-1 autocorrelation), Skew, Kurt,
-        and t, where t is the Newey–West adjusted t-statistic (lag=30).
-
-    Parameters:
-      summary_dly_df : pd.DataFrame
-          The original DataFrame. It must include columns "RV", "SW_0_30", and "ticker".
-      print_latex : bool, default False
-          If True, the function will print the LaTeX code for the table.
-
-    Returns:
-      out : pd.DataFrame
-          The merged summary statistics DataFrame.
-    """
     # Ensure ticker is a column
     df = summary_dly_df
 
@@ -299,6 +280,44 @@ def CarrWu2009_table_3(summary_dly_df, print_latex=False):
     return out
 
 
+
+def CarrWu2009_table_3_latex_stat(table_df):
+    """
+    Prints a LaTeX-formatted table with multi-level headers:
+      - Panel A: (stat) x 100
+
+    Each panel displays:
+      Mean, Std. dev., Auto, Skew, Kurt, and t (Newey–West adjusted).
+    """
+    # Reorder columns for clarity
+    table_df = table_df[
+        [
+            "ticker",
+            "Mean", "Std", "Auto", "Skew", "Kurt", "t",
+        ]
+    ]
+
+    # Create multi-level column headers
+    table_df.columns = pd.MultiIndex.from_tuples([
+        ("", "ticker"),
+        ("Panel A: (RV - SW) x 100", "Mean"),
+        ("Panel A: (RV - SW) x 100", "Std. dev."),
+        ("Panel A: (RV - SW) x 100", "Auto"),
+        ("Panel A: (RV - SW) x 100", "Skew"),
+        ("Panel A: (RV - SW) x 100", "Kurt"),
+        ("Panel A: (RV - SW) x 100", "t"),
+    ])
+
+    latex_code = table_df.to_latex(
+        index=False,
+        float_format="%.2f",
+        multicolumn=True,
+        multirow=True
+    )
+    print(latex_code)
+
+
+
 def CarrWu2009_table_3_latex(table_df):
     """
     Prints a LaTeX-formatted table with multi-level headers:
@@ -342,3 +361,93 @@ def CarrWu2009_table_3_latex(table_df):
     )
     print(latex_code)
 
+
+
+
+
+def CarrWu2009_table_3_choose_stat(summary_dly_df, print_latex=False, stat = "SW_0_30-RV_0_30"):
+    # Ensure ticker is a column
+    df = summary_dly_df
+
+    # Keep only rows where both RV and SW_0_30 are present
+    df_nonan = df.dropna(subset=[stat]).copy()
+
+    # Helper function to compute statistics including Newey-West adjusted t-stat
+    def compute_stats(series):
+        mean_ = series.mean()
+        std_ = series.std()
+        auto_ = series.autocorr(lag=1)
+        skew_ = series.skew()
+        kurt_ = series.kurt()
+        t_ = newey_west_t_stat(series, lag=30)
+        return pd.Series({
+            "Mean": mean_,
+            "Std. dev.": std_,
+            "Auto": auto_,
+            "Skew": skew_,
+            "Kurt": kurt_,
+            "t": t_
+        })
+
+    # Panel A: (RV - SW_0_30) x 100 (scale diff by 100)
+    df_stat = (
+        df_nonan
+        .groupby("ticker", group_keys=False)
+        .apply(lambda g: compute_stats(g[stat] * 100))
+        .reset_index()
+    )
+    df_stat.columns = [
+        "ticker",
+        "Mean", "Std", "Auto", "Skew", "Kurt", "t"
+    ]
+
+    out = CarrWu_order(df_stat)
+
+    if print_latex:
+        CarrWu2009_table_3_latex_stat(out)
+
+    return out
+
+
+def CarrWu2009_table_3_latex(table_df):
+    """
+    Prints a LaTeX-formatted table with multi-level headers:
+      - Panel A: (RV - SW_0_30) x 100
+      - Panel B: ln(RV / SW_0_30)
+
+    Each panel displays:
+      Mean, Std. dev., Auto, Skew, Kurt, and t (Newey–West adjusted).
+    """
+    # Reorder columns for clarity
+    table_df = table_df[
+        [
+            "ticker",
+            "Mean_diff", "Std_diff", "Auto_diff", "Skew_diff", "Kurt_diff", "t_diff",
+            "Mean_ln", "Std_ln", "Auto_ln", "Skew_ln", "Kurt_ln", "t_ln"
+        ]
+    ]
+
+    # Create multi-level column headers
+    table_df.columns = pd.MultiIndex.from_tuples([
+        ("", "ticker"),
+        ("Panel A: (RV - SW) x 100", "Mean"),
+        ("Panel A: (RV - SW) x 100", "Std. dev."),
+        ("Panel A: (RV - SW) x 100", "Auto"),
+        ("Panel A: (RV - SW) x 100", "Skew"),
+        ("Panel A: (RV - SW) x 100", "Kurt"),
+        ("Panel A: (RV - SW) x 100", "t"),
+        ("Panel B: ln(RV / SW)", "Mean"),
+        ("Panel B: ln(RV / SW)", "Std. dev."),
+        ("Panel B: ln(RV / SW)", "Auto"),
+        ("Panel B: ln(RV / SW)", "Skew"),
+        ("Panel B: ln(RV / SW)", "Kurt"),
+        ("Panel B: ln(RV / SW)", "t"),
+    ])
+
+    latex_code = table_df.to_latex(
+        index=False,
+        float_format="%.2f",
+        multicolumn=True,
+        multirow=True
+    )
+    print(latex_code)

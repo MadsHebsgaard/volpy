@@ -8,6 +8,7 @@ import time
 def load_option_data(file_path):
     columns_to_load = [
         "ticker",
+        "optionid",
         "date",
         "exdate",
         "cp_flag",
@@ -101,48 +102,50 @@ def load_realized_volatility(file_path):
     return df
 
 
-# def load_forward_price(file_path):
-#     columns_to_load = [
-#         "secid",
-#         "ticker",
-#         "date",
-#         "expiration",
-#         "ForwardPrice"
-#     ]
-
-#     # Load only the specified columns
-#     df = pd.read_csv(file_path, usecols=columns_to_load)
-
-#     # Format columns
-#     df['ticker'] = df['ticker'].astype('string')
-#     df['date'] = pd.to_datetime(df['date'], format='%Y-%m-%d', errors='coerce')
-#     df['expiration'] = pd.to_datetime(df['expiration'], format='%Y-%m-%d', errors='coerce')
-#     df["days"] = (df['expiration'] - df['date']).dt.days
-#     return df
-
-
 def load_forward_price(file_path):
-    df = pd.read_csv(file_path)
+    columns_to_load = [
+        "secid",
+        "ticker",
+        "date",
+        "expiration",
+        "forwardprice" #ForwardPrice
+    ]
 
-    # Ensret kolonnenavne til små bogstaver
-    df.columns = df.columns.str.lower()
+    # Load only the specified columns
+    df = pd.read_csv(file_path, usecols=columns_to_load)
 
-    # Omdøb "forwardprice" til "ForwardPrice" (med stort F og P), hvis nødvendigt
-    if "forwardprice" in df.columns:
-        df.rename(columns={"forwardprice": "ForwardPrice"}, inplace=True)
+    df.rename(columns={"forwardprice": "ForwardPrice"}, inplace=True)
 
-    # Behold kun de nødvendige kolonner
-    df = df[["secid", "ticker", "date", "expiration", "ForwardPrice"]]
-
-    # Formatér kolonner
-    df["ticker"] = df["ticker"].astype("string")
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    df["expiration"] = pd.to_datetime(df["expiration"], errors="coerce")
-
-    # Beregn "days"
-    df["days"] = (df["expiration"] - df["date"]).dt.days
-
+    # Format columns
+    df['ticker'] = df['ticker'].astype('string')
+    df['date'] = pd.to_datetime(df['date'], format='%Y-%m-%d', errors='coerce')
+    df['expiration'] = pd.to_datetime(df['expiration'], format='%Y-%m-%d', errors='coerce')
+    df["days"] = (df['expiration'] - df['date']).dt.days
     return df
+
+
+# def load_forward_price(file_path):
+#     df = pd.read_csv(file_path)
+
+#     # Ensret kolonnenavne til små bogstaver
+#     df.columns = df.columns.str.lower()
+
+#     # Omdøb "forwardprice" til "ForwardPrice" (med stort F og P), hvis nødvendigt
+#     if "forwardprice" in df.columns:
+#         df.rename(columns={"forwardprice": "ForwardPrice"}, inplace=True)
+
+#     # Behold kun de nødvendige kolonner
+#     df = df[["secid", "ticker", "date", "expiration", "ForwardPrice"]]
+
+#     # Formatér kolonner
+#     df["ticker"] = df["ticker"].astype("string")
+#     df["date"] = pd.to_datetime(df["date"], errors="coerce")
+#     df["expiration"] = pd.to_datetime(df["expiration"], errors="coerce")
+
+#     # Beregn "days"
+#     df["days"] = (df["expiration"] - df["date"]).dt.days
+
+#     return df
 
 
 def load_returns_and_price(file_path):
@@ -685,8 +688,13 @@ def interpolate_swaps_and_returns(summary_dly_df):
 
     buy_price = summary_dly_df["SW_m1_29"]
     sell_price = (1/30) * (summary_dly_df["squared_return"] + 29 * summary_dly_df["SW_0_29"])
-    summary_dly_df["SW_day"] = sell_price - buy_price  # (1 / 30) * (summary_dly_df["squared_return"] + 29 * summary_dly_df["SW_0_29"] - 30 * summary_dly_df["SW_m1_29"])
-    summary_dly_df["SW_day_return"] = sell_price / buy_price - 1
+    RF = summary_dly_df["RF"]
+
+    summary_dly_df['SW_day'] = sell_price - (1 + RF) * buy_price
+    summary_dly_df["SW_day_no_RF"] = sell_price - buy_price
+
+    summary_dly_df["SW_day_return"] = sell_price / ((1 + RF) * buy_price) - 1
+    summary_dly_df['SW_day_return_ro_RF'] = sell_price / buy_price - 1
 
     summary_dly_df["SW_sell"] = sell_price
     summary_dly_df["SW_buy"] = buy_price
