@@ -207,14 +207,18 @@ def fetch_options_data_progress(db, begdate, enddate, tickers, csv_path, chunk_s
 
                 if chunk.empty:
                     break  # Stop, hvis der ikke er flere data
+                
+                # chunk["best_bid"] = pd.to_numeric(chunk["best_bid"], errors="coerce")
+                # chunk["best_offer"] = pd.to_numeric(chunk["best_offer"], errors="coerce")
+                # chunk["ticker"] = chunk["ticker"].astype(str)  # Sikrer at ticker altid er string
 
                 if first_chunk:
                     # Skriv header kun for den første chunk
-                    chunk.to_csv(csv_path, index=False, mode='w')
+                    chunk.to_csv(csv_path, index=False, mode='w', sep=',', decimal='.')
                     first_chunk = False
                 else:
                     # Undlad at skrive header for efterfølgende chunks
-                    chunk.to_csv(csv_path, index=False, mode='a', header=False)
+                    chunk.to_csv(csv_path, index=False, mode='a', header=False, sep=',', decimal='.')
 
                 offset += chunk_size
 
