@@ -11,9 +11,7 @@ def dirs(profile):
     dir = {
         "OptionMetrics": Option_metrics_path,
         "CarrWu": Option_metrics_path / "1996-2003 (CarrWu2009)",
-        # "sp500": Option_metrics_path / "1996-2003 (CarrWu2009)" / "sp500",
         "i4s4": Option_metrics_path / "1996-2003 (CarrWu2009)" / "i4s4",
-        "i91": Option_metrics_path / "1996-2003 (CarrWu2009)" / "i91",
         "US ZOO": Option_metrics_path / "1996-2003 (CarrWu2009)" / "US ZOO",
         "i2s1 full": Option_metrics_path / "1996-2003 (CarrWu2009)" / "i2s1 full",
         "i4s4_CW":Option_metrics_path / "i4s4_CW",
@@ -49,12 +47,13 @@ def dirs(profile):
 def load_od_FW_ZCY(profile, data_folder="i4s4", tickers=None):
     """Loader optionsdata, forward priser, returns og yield curves."""
     dir_path = dirs(profile)
+    dir = dir_path[data_folder]
 
     # Load hver dataset direkte
-    od = vp.load_option_data(dir_path[data_folder] / "option data.csv")
-    FW = vp.load_forward_price(dir_path[data_folder] / "forward price.csv")
-    ret = vp.load_returns_and_price(dir_path[data_folder] / "returns and stock price.csv")
-    ZCY_curves = vp.load_ZC_yield_curve(dir_path[data_folder] / "ZC yield curve.csv")
+    od = vp.load_option_data(dir / "option data.csv")
+    FW = vp.load_forward_price(dir / "forward price.csv")
+    ret = vp.load_returns_and_price(dir / "returns and stock price.csv")
+    ZCY_curves = vp.load_ZC_yield_curve(dir / "ZC yield curve.csv")
 
     # Filtrér på tickers, hvis angivet
     if tickers:

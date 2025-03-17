@@ -114,7 +114,7 @@ def load_forward_price(file_path):
     # Load only the specified columns
     df = pd.read_csv(file_path, usecols=columns_to_load)
 
-    df.rename(columns={"forwardprice": "ForwardPrice"}, inplace=True)
+    # df.rename(columns={"ForwardPrice": "forwardprice"}, inplace=True)
 
     # Format columns
     df['ticker'] = df['ticker'].astype('string')
@@ -123,29 +123,6 @@ def load_forward_price(file_path):
     df["days"] = (df['expiration'] - df['date']).dt.days
     return df
 
-
-# def load_forward_price(file_path):
-#     df = pd.read_csv(file_path)
-
-#     # Ensret kolonnenavne til små bogstaver
-#     df.columns = df.columns.str.lower()
-
-#     # Omdøb "forwardprice" til "ForwardPrice" (med stort F og P), hvis nødvendigt
-#     if "forwardprice" in df.columns:
-#         df.rename(columns={"forwardprice": "ForwardPrice"}, inplace=True)
-
-#     # Behold kun de nødvendige kolonner
-#     df = df[["secid", "ticker", "date", "expiration", "ForwardPrice"]]
-
-#     # Formatér kolonner
-#     df["ticker"] = df["ticker"].astype("string")
-#     df["date"] = pd.to_datetime(df["date"], errors="coerce")
-#     df["expiration"] = pd.to_datetime(df["expiration"], errors="coerce")
-
-#     # Beregn "days"
-#     df["days"] = (df["expiration"] - df["date"]).dt.days
-
-#     return df
 
 
 def load_returns_and_price(file_path):
@@ -180,10 +157,11 @@ def load_ZC_yield_curve(file_path):
 
 def add_FW_to_od(od, FW):
     # Pre-group FW by date and ticker, and store sorted arrays for interpolation
+
     FW_grouped = {}
     for key, group in FW.groupby(["date", "ticker"]):
         group_sorted = group.sort_values("days")
-        FW_grouped[key] = (group_sorted["days"].values, group_sorted["ForwardPrice"].values)
+        FW_grouped[key] = (group_sorted["days"].values, group_sorted["forwardprice"].values)
 
     def interpolate_group(group):
         # Each group in od corresponds to one (date, ticker) pair
@@ -621,8 +599,8 @@ def interpolated_FW(FW_date, target_days, date = None, ticker=None, filter_date 
         raise ValueError(f"Not enough data points to interpolate for {target_days} days")
 
     # Extract the days and forward prices for interpolation
-    x0, y0 = lower['days'].values[0], lower['ForwardPrice'].values[0]
-    x1, y1 = upper['days'].values[0], upper['ForwardPrice'].values[0]
+    x0, y0 = lower['days'].values[0], lower['forwardprice'].values[0]
+    x1, y1 = upper['days'].values[0], upper['forwardprice'].values[0]
 
     # Perform linear interpolation
     if x0 == x1:
