@@ -10,38 +10,13 @@ def dirs(profile):
         Option_metrics_path = Path(r"C:\Users\axell\Desktop\CBS\data\OptionMetrics")
     dir = {
         "OptionMetrics": Option_metrics_path,
-        "CarrWu": Option_metrics_path / "1996-2003 (CarrWu2009)",
-        "i4s4": Option_metrics_path / "1996-2003 (CarrWu2009)" / "i4s4",
-        "US ZOO": Option_metrics_path / "1996-2003 (CarrWu2009)" / "US ZOO",
-        "i2s1 full": Option_metrics_path / "1996-2003 (CarrWu2009)" / "i2s1 full",
-        "i4s4_CW":Option_metrics_path / "i4s4_CW",
+        "i4s4_CW": Option_metrics_path / "i4s4_CW",
+        "SPX_short": Option_metrics_path / "SPX_short",
+        "SPX_full": Option_metrics_path / "SPX_full",
+        "i2s1_full": Option_metrics_path / "i2s1_full",
+        "s5_full": Option_metrics_path / "s5_full",
     }
     return dir
-
-
-# def load_od_FW_ZCY(profile, data_folder = "i4s4", tickers = None):
-#     dir = dirs(profile)
-
-
-#     # Define the i4s4 data files and their loaders (excluding ZCY_curve)
-#     files_and_loaders = {
-#         "od": (dir[data_folder] / "option data.csv", vp.load_option_data),  # Option data on i4s4 (4 index, 4 stocks)
-#         # "RV": (dir[data_folder] / "realized vol.csv", vp.load_realized_volatility),
-#         # "IV": (dir[data_folder] / "implied vol.csv", vp.load_implied_volatility),
-#         "FW": (dir[data_folder] / "forward price.csv", vp.load_forward_price),  # Forward data on i4s4
-#         "ret": (dir[data_folder] / "returns and stock price.csv", vp.load_returns_and_price)
-#     }
-
-#     # Load all i4s4 data into a dictionary
-#     data = {name: loader(path) for name, (path, loader) in files_and_loaders.items()}
-
-#     if tickers is not None:
-#         data = {key: df[df["ticker"].isin(tickers)] for key, df in data.items()}
-
-#     ZCY_curves = vp.load_ZC_yield_curve(dir["CarrWu"] / "ZC yield curve Full.csv")
-#     ZCY_curves = ZCY_curves[ZCY_curves["date"] <= data["od"]["date"].max()]
-
-#     return data["od"], data["FW"], ZCY_curves, data["ret"]
 
 
 def load_od_FW_ZCY(profile, data_folder="i4s4", tickers=None):
