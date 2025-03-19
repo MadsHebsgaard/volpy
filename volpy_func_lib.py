@@ -436,15 +436,35 @@ def process_group_activity_summary(group):
         summary["Inactive reason"] = "min days > 90"
         return group, summary
 
-    # Select two lowest days above 7 days.
-    # If the smallest day is <= 8 and at least 3 unique days exist, skip it.
-    low_2_days = list(unique_days[:2])
-    if low_2_days[0] <= 8:
-        if len(unique_days) < 3:
-            summary["Active"] = False
-            summary["Inactive reason"] = "min days <= 8 & len < 3"
-            return group, summary
-        low_2_days = list(unique_days[1:3])
+    # # Select two lowest days above 7 days.
+    # # If the smallest day is <= 8 and at least 3 unique days exist, skip it.
+    # low_2_days = list(unique_days[:2])
+    # if low_2_days[0] <= 8:
+    #     if len(unique_days) < 3:
+    #         summary["Active"] = False
+    #         summary["Inactive reason"] = "min days <= 8 & len < 3"
+    #         return group, summary
+    #     low_2_days = list(unique_days[1:3])
+
+    # summary["low days"] = low_2_days[0]
+    # summary["high days"] = low_2_days[1]
+
+
+    # updated: choose nearest 30 
+    days_below_30 = unique_days[(unique_days <= 30) & (unique_days > 8)]
+    days_above_30 = unique_days[unique_days > 30]
+    
+    if len(days_below_30) > 0 and len(days_above_30) > 0:
+        low_2_days = [max(days_below_30), min(days_above_30)]
+    elif len(days_below_30) >= 2:
+        low_2_days = list(days_below_30[-2:])
+    elif len(days_above_30) >= 2:
+        low_2_days = list(days_above_30[:2])
+
+    if len(unique_days) < 3 and unique_days[0] <= 8:
+        summary["Active"] = False
+        summary["Inactive reason"] = "min days <= 8 & len < 3"
+        return group, summary 
 
     summary["low days"] = low_2_days[0]
     summary["high days"] = low_2_days[1]
