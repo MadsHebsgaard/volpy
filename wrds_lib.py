@@ -954,6 +954,8 @@ def fetch_wrds_data(db, profile, folder_name, begdate, enddate, tickers=None, da
 
     # Find base directory for brugerprofil
     base_dir = load.dirs(profile)["OptionMetrics"] / folder_name
+    # base_dir = load.Option_metrics_path_from_profile(profile) / folder_name # todo: use this function instead, haven't tested
+
 
     # Tjek om mappen allerede eksisterer og indeholder filer
     if base_dir.exists() and any(base_dir.iterdir()):
