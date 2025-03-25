@@ -37,6 +37,8 @@ def load_option_data(file_path):
     df['exdate'] = pd.to_datetime(df['exdate'], format='%Y-%m-%d', errors='coerce')
     df['cp_flag'] = df['cp_flag'].astype('string')
     df['ticker'] = df['ticker'].astype('string')
+    df['optionid'] = df['optionid'].astype(int)
+
     # df['exercise_style'] = df['exercise_style'].astype('string')
     df['K'] /= 1000
 
@@ -612,10 +614,6 @@ def interpolated_FW(FW_date, target_days, date = None, ticker=None, filter_date 
 from tqdm import tqdm
 
 
-def fill_swap_rates(summary_dly_df, od_rdy, n_points=200):
-    summary_dly_df = high_low_swap_rates(summary_dly_df, od_rdy, n_points=n_points)
-    summary_dly_df = interpolate_swaps_and_returns(summary_dly_df)
-    return summary_dly_df
 
 
 def high_low_swap_rates(summary_dly_df, od_rdy, n_points=200):
@@ -658,21 +656,30 @@ def interpolate_swaps_and_returns(summary_dly_df):
     T2 = summary_dly_df["high days"]
     SW1 = summary_dly_df["low SW"]
     SW2 = summary_dly_df["high SW"]
+    RF = summary_dly_df["RF"]
 
     summary_dly_df["SW_0_30"] = (1 / (T - t)) * (SW1 * (T1 - t) * (T2 - T) + SW2 * (T2 - t) * (T - T1)) / (T2 - T1)
+
+    summary_dly_df["SW_m30_0"] = summary_dly_df.groupby("ticker")["SW_0_30"].shift(30)
+    summary_dly_df["RV_m30_0"] = summary_dly_df.groupby("ticker")["RV"].shift(30)
+    summary_dly_df["SW_month"] = summary_dly_df["RV_m30_0"] - summary_dly_df['SW_m30_0']
+
+    summary_dly_df['SW_month_ln_ret'] = np.log(np.maximum(summary_dly_df["RV_m30_0"], 0.001) / np.maximum(summary_dly_df['SW_m30_0'], 0.001))
+    summary_dly_df["SW_month_ln_ret_RF"] = np.log(np.maximum(summary_dly_df["RV_m30_0"], 0.001) / np.maximum((1 + RF) * summary_dly_df['SW_m30_0'], 0.001))
+
+
     summary_dly_df["SW_m1_29"] = summary_dly_df.groupby("ticker")["SW_0_30"].shift(1)
     summary_dly_df["SW_0_29"] = (1 / (T - (t + 1))) * (SW1 * (T1 - (t + 1)) * (T2 - T) + SW2 * (T2 - (t + 1)) * (T - T1)) / (T2 - T1)
     # summary_dly_df["SW_1_30"] = summary_dly_df.groupby("ticker")["SW_0_29"].shift(-1)
 
     buy_price = summary_dly_df["SW_m1_29"]
     sell_price = (1/30) * (summary_dly_df["squared_return"] + 29 * summary_dly_df["SW_0_29"])
-    RF = summary_dly_df["RF"]
 
-    summary_dly_df['SW_day'] = sell_price - (1 + RF) * buy_price
-    summary_dly_df["SW_day_no_RF"] = sell_price - buy_price
+    summary_dly_df["SW_day"] = sell_price - buy_price
+    summary_dly_df['SW_day_RF'] = sell_price - (1 + RF) * buy_price
 
-    summary_dly_df["SW_day_return"] = sell_price / ((1 + RF) * buy_price) - 1
-    summary_dly_df['SW_day_return_ro_RF'] = sell_price / buy_price - 1
+    summary_dly_df['SW_day_ln_ret'] = np.log(np.maximum(sell_price, 0.001) / np.maximum(buy_price, 0.001))
+    summary_dly_df["SW_day_ln_ret_RF"] = np.log(np.maximum(sell_price, 0.001) / np.maximum((1 + RF) * buy_price, 0.001))
 
     summary_dly_df["SW_sell"] = sell_price
     summary_dly_df["SW_buy"] = buy_price
@@ -687,7 +694,7 @@ def add_realized_vol_to_summary(summary_dly_df, real_vol):
 
     # Merge by specifying left_on and right_on keys
     merged_df = summary_dly_df_reset.merge(
-        real_vol[['date', 'ticker', 'RV', 'open', 'squared_return']],
+        real_vol[['date', 'ticker', 'RV', 'open', 'close', 'squared_return', 'return']],
         left_on=['date', 'ticker'],
         right_on=['date', 'ticker'],
         how='left'

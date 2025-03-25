@@ -8,6 +8,7 @@ def dirs(profile):
         Option_metrics_path = Path(r"D:\Finance Data\OptionMetrics")
     elif profile == "Axel":
         Option_metrics_path = Path(r"C:\Users\axell\Desktop\CBS\data\OptionMetrics")
+
     dir = {
         "OptionMetrics": Option_metrics_path,
         "i4s4_CW": Option_metrics_path / "i4s4_CW",
@@ -15,14 +16,33 @@ def dirs(profile):
         "SPX_full": Option_metrics_path / "SPX_full",
         "i2s1_full": Option_metrics_path / "i2s1_full",
         "s5_full": Option_metrics_path / "s5_full",
+        "SPX_full_v2": Option_metrics_path / "SPX_full_v2",
     }
     return dir
 
+def Option_metrics_path_from_profile(profile):
+    if profile == "Mads":
+        return Path(r"D:\Finance Data\OptionMetrics")
+    elif profile == "Axel":
+        return Path(r"C:\Users\axell\Desktop\CBS\data\OptionMetrics")
+    else:
+        print("choose viable profile such as 'Axel' or 'Mads'")
+    return
 
-def load_od_FW_ZCY(profile, data_folder="i4s4", tickers=None):
+def volpy_output_dir(profile, om_folder):
+    om_dir = Option_metrics_path_from_profile(profile)
+    return om_dir / "volpy data output" / om_folder
+
+
+def load_od_FW_ZCY(profile, om_folder="i4s4", tickers=None):
     """Loader optionsdata, forward priser, returns og yield curves."""
-    dir_path = dirs(profile)
-    dir = dir_path[data_folder]
+    om_dir = Option_metrics_path_from_profile(profile)
+    dir = om_dir / om_folder
+
+    if not dir.is_dir():
+        print("The specified OptionMetrics folder 'om_folder' does not exist, add the folder to OptionMetrics directorary")
+
+    volpy_output_dir(profile, om_folder).mkdir(parents=True, exist_ok=True)
 
     # Load hver dataset direkte
     od = vp.load_option_data(dir / "option data.csv")
@@ -84,18 +104,23 @@ def summary_dly_df_creator(od):
     return summary_dly_df
 
 
-def load_clean_and_prepare_od(data_folder, profile="Mads", tickers=None, first_day=None, last_day=None, IV_type = "od"):
+def load_clean_and_prepare_od(om_folder, profile="Mads", tickers=None, first_day=None, last_day=None, IV_type = "od"):
     # load data
-    od, FW, ZCY_curves, returns_and_prices = load_od_FW_ZCY(profile, data_folder, tickers=tickers)
+    od, FW, ZCY_curves, returns_and_prices = load_od_FW_ZCY(profile, om_folder, tickers=tickers)
 
     if first_day is None:   first_day = od["date"].min()
     if last_day is None:    last_day = od["date"].max()
 
+    # add forward (before cleaning such that od_raw has the forward rate, used in options trats for ATM options that might be slightly ITM)
+    od = vp.add_FW_to_od(od, FW)
+
+    # add IV to options (bid/ask/mid/om)
+    od["IV"] = vp.add_bid_mid_ask_IV(od, IV_type)
+
+    od_raw = od
+
     # clean data (should be looked upon)
     od = clean_od(od, first_day=first_day, last_day=last_day)
-
-    # add forward
-    od = vp.add_FW_to_od(od, FW)
 
     # remove if ITM
     od = od.loc[((od["F"] < od["K"]) & (od["cp_flag"] == "C")) | ((od["F"] > od["K"]) & (od["cp_flag"] == "P"))]
@@ -103,10 +128,7 @@ def load_clean_and_prepare_od(data_folder, profile="Mads", tickers=None, first_d
     # add r to options
     od = vp.add_r_to_od_parallel(od, ZCY_curves)
 
-    # add IV to options (bid/ask/mid/om)
-    od["IV"] = vp.add_bid_mid_ask_IV(od, IV_type)
-
-    return od, returns_and_prices
+    return od, returns_and_prices, od_raw
 
 
 def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None, n_grid=200):
@@ -130,8 +152,8 @@ def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None,
     # only keep the lowest ("low") and the second lowest ("high") TTMs
     od_rdy = od[(od["low"] == True) | (od["high"] == True)]
 
-    # Calculate Swap Rates
-    summary_dly_df = vp.fill_swap_rates(summary_dly_df, od_rdy, n_points=n_grid)
+    # Calculate high/low Swap Rates
+    summary_dly_df = vp.high_low_swap_rates(summary_dly_df, od_rdy, n_points=n_grid)
 
     return summary_dly_df, od_rdy
 
