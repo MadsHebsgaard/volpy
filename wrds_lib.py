@@ -192,9 +192,8 @@ def fetch_options_data_progress(db, begdate, enddate, tickers, csv_path, chunk_s
                 FROM optionm.opprcd{year} o
                 LEFT JOIN optionm.securd1 s ON o.secid = s.secid
                 WHERE o.date BETWEEN {begdate_sql} AND {enddate_sql}
-                  AND (o.exdate - o.date) > 8  
                   AND (o.exdate - o.date) <= 365
-            """
+            """ # AND (o.exdate - o.date) > 8  
 
             if secid_list:
                 query += f" AND o.secid IN {secid_str}"
@@ -813,6 +812,98 @@ def fetch_zerocoupons(db, begdate, enddate, csv_path):
     return df
 
 
+def fetch_dividends_progress(db, begdate, enddate, tickers, csv_path):
+    """
+    Henter distributions-/udbyttedata fra OptionMetrics' distrproj-tabeller i en 
+    periode mellem begdate og enddate for de givne tickers.
+
+    Antagelser:
+      - 'optionm.distrprojYYYY' er tabellerne med exdate + 3 andre kolonner.
+      - 'exdate' er den dato-kolonne, vi vil filtrere på.
+      - 'optionm.securd1' indeholder secid, ticker, cusip, issuer.
+      - 'db' er en WRDS-forbindelse (f.eks. wrds.Connection()).
+
+    Parametre:
+      db (wrds.Connection): Databaseforbindelse til WRDS.
+      begdate (str): Startdato i format 'YYYY-MM-DD'.
+      enddate (str): Slutdato i format 'YYYY-MM-DD'.
+      tickers (list eller str): En eller flere tickers at filtrere på.
+      csv_path (str): Sti til output-CSV.
+    
+    Returnerer:
+      pd.DataFrame med de hentede distributionsdata, inkl. ticker, cusip, issuer.
+    """
+
+    # Konverter input-datoer til SQL-format
+    begdate_sql = f"'{begdate}'"
+    enddate_sql = f"'{enddate}'"
+
+    # 1) Hent de relevante secid'er ud fra tickers
+    secid_list = None
+    if tickers:
+        # Håndtér, hvis tickers er en enkelt streng
+        if isinstance(tickers, str):
+            tickers = [tickers]
+
+        # Hent secid, ticker, cusip, issuer fra securd1
+        secid_df = db.raw_sql(f"""
+            SELECT secid, ticker, cusip, issuer
+            FROM optionm.securd1
+            WHERE ticker IN ({', '.join(f"'{t}'" for t in tickers)})
+        """)
+
+        secid_list = secid_df["secid"].tolist()
+
+        if len(secid_list) == 1:
+            secid_str = f"({secid_list[0]})"
+        elif secid_list:
+            secid_str = f"({', '.join(map(str, secid_list))})"
+        else:
+            secid_str = "(NULL)"
+    else:
+        # Hvis ingen tickers, kan du selv vælge logik:
+        secid_str = "(NULL)"  # eller hent alt, men det kan være kæmpestort
+
+    # 2) Definer start- og slutår (ligesom i fetch_stock_returns_progress)
+    start_year = max(int(begdate[:4]), 1996)  # OptionMetrics startår
+    end_year = min(int(enddate[:4]) + 1, 2024)  # Sæt selv grænse for slutår
+
+    df_list = []
+
+    # 3) Loop over hvert år og hent data
+    with tqdm(total=end_year - start_year, desc="Collecting dividend data", unit="years") as pbar:
+        for year in range(start_year, end_year):
+            # Byg query. Vi antager her, at tabellen hedder "optionm.distrprojYYYY"
+            # og at kolonnen med dato hedder "exdate"
+            query = f"""
+                SELECT p.*, s.ticker, s.cusip, s.issuer
+                FROM optionm.distrproj{year} p
+                LEFT JOIN optionm.securd1 s ON p.secid = s.secid
+                WHERE p.exdate BETWEEN {begdate_sql} AND {enddate_sql}
+            """
+
+            if secid_list:
+                query += f" AND p.secid IN {secid_str}"
+
+            # Hent data via WRDS
+            # Vi specificerer date_cols=["exdate"], så WRDS parser exdate som en dato
+            df_year = db.raw_sql(query, date_cols=["exdate"])
+            df_list.append(df_year)
+
+            pbar.update(1)
+
+    # 4) Saml alt i én DataFrame
+    df = pd.concat(df_list, ignore_index=True)
+    # Sortér for god ordens skyld
+    df.sort_values(by=["ticker", "exdate"], inplace=True)
+
+    # 5) Gem til CSV
+    df.to_csv(csv_path, index=False)
+
+    print(f"Data collected and saved: {len(df)} rows to {csv_path}.")
+    return df
+
+
 
 
 
@@ -877,7 +968,8 @@ def fetch_wrds_data(db, profile, folder_name, begdate, enddate, tickers=None, da
         "O": (fetch_options_data_progress if progress else fetch_options_data, "option data.csv"),
         "F": (fetch_forward_prices_progress if progress else fetch_forward_prices, "forward price.csv"),
         "S": (fetch_stock_returns_progress if progress else fetch_stock_returns, "returns and stock price.csv"),
-        "Z": (fetch_zerocoupons, "ZC yield curve.csv")
+        "Z": (fetch_zerocoupons, "ZC yield curve.csv"),
+        "D": (fetch_dividends_progress, "Dividends.csv")
     }
 
     # Initialiser dictionary til dataframes
