@@ -5,6 +5,14 @@ from datetime import datetime
 import sys
 import time
 
+# from global_settings import days_type
+import importlib
+import global_settings
+importlib.reload(global_settings)
+days_type = global_settings.days_type
+clean_t_days = global_settings.clean_t_days
+
+
 def load_option_data(file_path):
     columns_to_load = [
         "ticker",
@@ -27,6 +35,7 @@ def load_option_data(file_path):
     # Load only the specified columns
     df = pd.read_csv(file_path, usecols=columns_to_load)
 
+
     df.rename(columns={"strike_price": "K"}, inplace=True)
     df.rename(columns={"best_bid": "bid"}, inplace=True)
     df.rename(columns={"best_offer": "ask"}, inplace=True)
@@ -42,22 +51,39 @@ def load_option_data(file_path):
     # df['exercise_style'] = df['exercise_style'].astype('string')
     df['K'] /= 1000
 
-    unique_trading_days = df[df["ticker"] == "SPX"]["date"].drop_duplicates().sort_values()  # [df["ticker"] == "SPX"]
+    # load valid dates
+    unique_calendar_days = df["date"].drop_duplicates().sort_values()  # [df["ticker"] == "SPX"]
+    valid_dates = pd.read_csv(r"D:\Finance Data\OptionMetrics\dates.csv", usecols=["DATE"], parse_dates=["DATE"])
+    valid_dates.rename(columns={"DATE": "date"}, inplace=True)
+    valid_dates = valid_dates[valid_dates["date"] >= unique_calendar_days.iloc[0]]
+    valid_dates = valid_dates["date"]
 
     # Create a mapping of date to trading day number
-    trading_day_map = {date: n for n, date in enumerate(unique_trading_days)}
+    trading_day_map = {date: n for n, date in enumerate(valid_dates)}
+    dates = valid_dates.values.astype("datetime64[ns]")
+    exdates = df["exdate"].values.astype("datetime64[ns]")
+    indices = np.searchsorted(dates, exdates, side="right") - 1
+    indices = np.where(indices < 0, np.nan, indices)
 
-    total_trading_days = unique_trading_days.nunique()
-    total_calendar_days = (unique_trading_days.max() - unique_trading_days.min()).days + 1
-    average_trading_days_per_year = (total_trading_days * 365) / total_calendar_days
+    total_trading_days = unique_calendar_days.nunique()
+    total_calendar_days = (unique_calendar_days.max() - unique_calendar_days.min()).days + 1
+
+    average_calendar_days_per_year = 365
+    average_trading_days_per_year = total_trading_days * (average_calendar_days_per_year / total_calendar_days)
 
     # Add the n_trading_day column to the DataFrame
     df["n_trading_day"] = df["date"].map(trading_day_map)
-    # df["n_trading_day_exdate"] = df["exdate"].map(trading_day_map)
+    df["n_trading_day_exdate"] = indices
+
+    # df["n_trading_day_exdate"] = df["exdate"].apply(get_trading_day)
+    df["t_days"] = df["n_trading_day_exdate"] - df["n_trading_day"]
+    df["t_TTM"] = df["t_days"] / average_trading_days_per_year #todo: do this on yearly basis to fix if average trading days change throughout years
 
     # Calendar (_cal)
-    df["days"] = (df["exdate"] - df["date"]).dt.days
-    # df["TTM"] = df["days"] / 365
+    df["c_days"] = (df["exdate"] - df["date"]).dt.days
+    df["c_TTM"] = df["c_days"] / average_calendar_days_per_year
+
+    df = df.sort_values(by="date")
 
     # Trading (_trd)
     # df["TTM_trd"] = (df["n_trading_day_exdate"] - df["n_trading_day"]) / round(average_trading_days_per_year)
@@ -65,43 +91,43 @@ def load_option_data(file_path):
     return df
 
 
-def load_implied_volatility(file_path):
-    columns_to_load = [
-        "secid",
-        "ticker",
-        "date",
-        "days",
-        "delta",
-        "impl_volatility",
-        "cp_flag",
-    ]
-
-    # Load only the specified columns
-    df = pd.read_csv(file_path, usecols=columns_to_load)
-
-    # Format columns
-    df['ticker'] = df['ticker'].astype('string')
-    df['date'] = pd.to_datetime(df['date'], format='%Y-%m-%d', errors='coerce')
-    df['cp_flag'] = df['cp_flag'].astype('string')
-    return df
-
-
-def load_realized_volatility(file_path):
-    columns_to_load = [
-        "secid",
-        "ticker",
-        "date",
-        "days",
-        "volatility"
-    ]
-
-    # Load only the specified columns
-    df = pd.read_csv(file_path, usecols=columns_to_load)
-
-    # Format columns
-    df['ticker'] = df['ticker'].astype('string')
-    df['date'] = pd.to_datetime(df['date'], format='%Y-%m-%d', errors='coerce')
-    return df
+# def load_implied_volatility(file_path):
+#     columns_to_load = [
+#         "secid",
+#         "ticker",
+#         "date",
+#         "days",
+#         "delta",
+#         "impl_volatility",
+#         "cp_flag",
+#     ]
+#
+#     # Load only the specified columns
+#     df = pd.read_csv(file_path, usecols=columns_to_load)
+#
+#     # Format columns
+#     df['ticker'] = df['ticker'].astype('string')
+#     df['date'] = pd.to_datetime(df['date'], format='%Y-%m-%d', errors='coerce')
+#     df['cp_flag'] = df['cp_flag'].astype('string')
+#     return df
+#
+#
+# def load_realized_volatility(file_path):
+#     columns_to_load = [
+#         "secid",
+#         "ticker",
+#         "date",
+#         "days",
+#         "volatility"
+#     ]
+#
+#     # Load only the specified columns
+#     df = pd.read_csv(file_path, usecols=columns_to_load)
+#
+#     # Format columns
+#     df['ticker'] = df['ticker'].astype('string')
+#     df['date'] = pd.to_datetime(df['date'], format='%Y-%m-%d', errors='coerce')
+#     return df
 
 
 def load_forward_price(file_path):
@@ -122,7 +148,16 @@ def load_forward_price(file_path):
     df['ticker'] = df['ticker'].astype('string')
     df['date'] = pd.to_datetime(df['date'], format='%Y-%m-%d', errors='coerce')
     df['expiration'] = pd.to_datetime(df['expiration'], format='%Y-%m-%d', errors='coerce')
-    df["days"] = (df['expiration'] - df['date']).dt.days
+    df["c_days"] = (df['expiration'] - df['date']).dt.days
+
+    # Create a mapping of date to trading day number
+    unique_calendar_days = df["date"].drop_duplicates().sort_values()  # [df["ticker"] == "SPX"]
+    trading_day_map = {date: n for n, date in enumerate(unique_calendar_days)}
+
+    df["n_trading_day"] = df["date"].map(trading_day_map) # todo: make these variables instead, not to clog up dataframe
+    df["n_trading_day_exdate"] = df["expiration"].map(trading_day_map)
+    df["t_days"] = df["n_trading_day_exdate"] - df["n_trading_day"]
+
     return df
 
 
@@ -153,6 +188,8 @@ def load_ZC_yield_curve(file_path):
     df = pd.read_csv(file_path)
     df['date'] = pd.to_datetime(df['date'], format='%Y-%m-%d', errors='coerce')
     df['rate'] /= 100
+    df.rename(columns={"days": "c_days"}, inplace=True)
+    df['c_days'] = df['c_days'].astype(int)
     return df
 
 
@@ -160,10 +197,13 @@ def load_ZC_yield_curve(file_path):
 def add_FW_to_od(od, FW):
     # Pre-group FW by date and ticker, and store sorted arrays for interpolation
 
+    days_var = days_type() + "days"
+    days_var = "c_days" #todo: maybe should be able to use trading days (don't think so though)
+
     FW_grouped = {}
     for key, group in FW.groupby(["date", "ticker"]):
-        group_sorted = group.sort_values("days")
-        FW_grouped[key] = (group_sorted["days"].values, group_sorted["forwardprice"].values)
+        group_sorted = group.sort_values("c_days")
+        FW_grouped[key] = (group_sorted[days_var].values, group_sorted["forwardprice"].values)
 
     def interpolate_group(group):
         # Each group in od corresponds to one (date, ticker) pair
@@ -173,11 +213,11 @@ def add_FW_to_od(od, FW):
         x, y = FW_grouped[key]
 
         # Check that all target days are within the FW range (to mimic your error condition)
-        if group["days"].min() < x[0] or group["days"].max() > x[-1]:
+        if group[days_var].min() < x[0] or group[days_var].max() > x[-1]:
             raise ValueError(f"Not enough data points to interpolate for some days in group {key}")
 
         # Use numpy's vectorized interpolation for the entire group
-        group.loc[:, "F"] = np.interp(group["days"], x, y)
+        group.loc[:, "F"] = np.interp(group[days_var], x, y)
         return group
 
     # Apply the interpolation function to each group in od
@@ -264,15 +304,19 @@ import concurrent.futures
 
 
 def compute_rates_for_date(group, ZCY_curves):
+
+    # days_var = days_type() + "days"
+    days_var = "c_days"
+
     current_date = group["date"].iloc[0]
     # Compute the yield curve for the current date once
     ZCY_date = interpolate_yield_curve_between_dates(ZCY_curves, current_date)
-    ZCY_date = ZCY_date.sort_values("days")
-    x = ZCY_date["days"].values
+    ZCY_date = ZCY_date.sort_values(days_var)
+    x = ZCY_date[days_var].values
     y = ZCY_date["rate"].values
 
     # Get the target 'days' values for this group
-    target_days = group["days"].values
+    target_days = group[days_var].values
     interpolated_rates = np.empty_like(target_days, dtype=float)
 
     # Masks for in-range, below-range, and above-range target days
@@ -314,16 +358,19 @@ def add_r_to_od_parallel(od, ZCY_curves, max_workers=None):
 
 
 def add_r_to_od(od, ZCY_curves):
+
+    days_var = days_type() + "days"
+
     def compute_rates_for_date(group):
         current_date = group["date"].iloc[0]
         # Compute the yield curve for the current date once
         ZCY_date = interpolate_yield_curve_between_dates(ZCY_curves, current_date)
-        ZCY_date = ZCY_date.sort_values("days")
-        x = ZCY_date["days"].values
+        ZCY_date = ZCY_date.sort_values(days_var)
+        x = ZCY_date[days_var].values
         y = ZCY_date["rate"].values
 
         # Get the target 'days' values for this group
-        target_days = group["days"].values
+        target_days = group[days_var].values
         interpolated_rates = np.empty_like(target_days, dtype=float)
 
         # Mask for in-range, below-range, and above-range target days
@@ -397,6 +444,8 @@ def vectorized_iv(F, K, T, market_price, cp_flag, tol=1e-6, max_iter=100):
 
 def add_bid_mid_ask_IV(od, IV_type):
 
+    TTM_var = days_type() + "TTM"
+
     # Compute IV_bid vectorized
     if IV_type == "om":
         return od["IV_om"]
@@ -404,7 +453,7 @@ def add_bid_mid_ask_IV(od, IV_type):
         market_price = od[IV_type].values
 
     # Prepare the inputs from your DataFrame
-    T = od["days"].values / 365.0
+    T = od[TTM_var].values
     F = od["F"].values
     K = od["K"].values
     cp_flag = od["cp_flag"].values  # Assumes an array of "C" and "P"
@@ -413,6 +462,14 @@ def add_bid_mid_ask_IV(od, IV_type):
     return IV
 
 def process_group_activity_summary(group):
+
+    days_var = days_type() + "days"
+
+    if days_type() == "t_" and clean_t_days():
+        x = 1
+    else:
+        x = 0
+
     # Extract the current date and ticker from the group
     current_date = group["date"].iloc[0]
     current_ticker = group["ticker"].iloc[0]
@@ -423,7 +480,7 @@ def process_group_activity_summary(group):
     group["high"] = False
 
     # Get sorted unique days for this (date, ticker) pair
-    unique_days = np.sort(group["days"].unique())
+    unique_days = np.sort(group[days_var].unique())
     summary["#days"] = len(unique_days)
 
     # Inactive if there are fewer than 2 unique days
@@ -433,7 +490,7 @@ def process_group_activity_summary(group):
         return group, summary
 
     # Inactive if the minimum day is > 90
-    if unique_days[0] > 90:
+    if unique_days[0] > 90 - x*90*0.3: #todo: change to above something like x_TTM > 0.25
         summary["Active"] = False
         summary["Inactive reason"] = "min days > 90"
         return group, summary
@@ -441,7 +498,7 @@ def process_group_activity_summary(group):
     # Select two lowest days above 7 days.
     # If the smallest day is <= 8 and at least 3 unique days exist, skip it.
     low_2_days = list(unique_days[:2])
-    if low_2_days[0] <= 8:
+    if low_2_days[0] <= 8 - x*2: #todo: change to above something like <= 6 || <= 8 depending on 'days_type'
         if len(unique_days) < 3:
             summary["Active"] = False
             summary["Inactive reason"] = "min days <= 8 & len < 3"
@@ -454,7 +511,7 @@ def process_group_activity_summary(group):
     # Check unique strike counts for each selected day; require at least 3
     active = True
     for day, label in zip(low_2_days, ["low", "high"]):
-        num_strikes = group.loc[group["days"] == day, "K"].nunique()
+        num_strikes = group.loc[group[days_var] == day, "K"].nunique()
         summary[f"{label} #K"] = num_strikes
         if num_strikes < 3:
             active = False
@@ -468,8 +525,8 @@ def process_group_activity_summary(group):
     summary["Inactive reason"] = ""
 
     # Set the 'low' and 'high' flags for the corresponding rows
-    group.loc[group["days"] == low_2_days[0], "low"] = True
-    group.loc[group["days"] == low_2_days[1], "high"] = True
+    group.loc[group[days_var] == low_2_days[0], "low"] = True
+    group.loc[group[days_var] == low_2_days[1], "high"] = True
 
     return group, summary
 
@@ -513,14 +570,17 @@ def od_filter_and_summary_creater(od):
 
 
 def interpolate_yield_curve_between_dates(ZCY_curves, date):
+
+    days_var = "c_days"
+
     next_date_val = ZCY_curves[ZCY_curves['date'] >= date].head(1)['date'].iloc[0]
     prev_date_val = ZCY_curves[ZCY_curves['date'] <= date].tail(1)['date'].iloc[0]
 
     next_Curve = ZCY_curves[ZCY_curves['date'] == next_date_val]
     prev_Curve = ZCY_curves[ZCY_curves['date'] == prev_date_val]
 
-    valid_days = set(next_Curve['days']).union(set(prev_Curve['days']))
-    ZCY_date = pd.DataFrame({'days': sorted(valid_days)})
+    valid_days = set(next_Curve[days_var]).union(set(prev_Curve[days_var]))
+    ZCY_date = pd.DataFrame({days_var: sorted(valid_days)})
     ZCY_date['date'] = date
 
     next_date_diff = (next_date_val - date) / np.timedelta64(1, 'D')
@@ -529,34 +589,25 @@ def interpolate_yield_curve_between_dates(ZCY_curves, date):
 
     if total_diff == 0:
         # Avoid division by zero: if the two dates are identical, use next_Curve rates directly.
-        ZCY_date['rate'] = ZCY_date['days'].apply(lambda d: interpolated_ZCY(next_Curve, d))
+        ZCY_date['rate'] = ZCY_date[days_var].apply(lambda d: interpolated_ZCY(next_Curve, d))
     else:
         def interpolate_rate(days):
             next_rate = interpolated_ZCY(next_Curve, days)
             prev_rate = interpolated_ZCY(prev_Curve, days)
             return (next_rate * prev_date_diff + prev_rate * next_date_diff) / total_diff
 
-        ZCY_date['rate'] = ZCY_date['days'].apply(interpolate_rate)
+        ZCY_date['rate'] = ZCY_date[days_var].apply(interpolate_rate)
     return ZCY_date
 
 
 
 def interpolated_ZCY(ZCY_date, target_days, date = None, filter_date = True):
-    # Filter the DataFrame for the given date
-    # if filter_date == True:
-    #     ZCY_date = ZCY_curves[ZCY_curves['date'] == date]
-    # else:
-    #     ZCY_date = ZCY_curves
-    # if ZCY_date.empty:
-    #     print(f"No data available for the date {date}, it will be interpolated")
-    #     ZCY_date = interpolate_yield_curve_between_dates(ZCY_curves, date)
 
-    # Sort the DataFrame by days to find the nearest points
-    # ZCY_date = ZCY_date.sort_values(by='days')
+    days_var = "c_days"
 
     # Find the two nearest points
-    lower = ZCY_date[ZCY_date['days'] <= target_days].tail(1)
-    upper = ZCY_date[ZCY_date['days'] >= target_days].head(1)
+    lower = ZCY_date[ZCY_date[days_var] <= target_days].tail(1)
+    upper = ZCY_date[ZCY_date[days_var] >= target_days].head(1)
 
     # Handle cases where lower or upper is empty
     if lower.empty:
@@ -569,8 +620,8 @@ def interpolated_ZCY(ZCY_date, target_days, date = None, filter_date = True):
         lower = ZCY_date.iloc[[-2]]  # Second highest point
 
     # Extract the days and rates for interpolation
-    x0, y0 = lower['days'].values[0], lower['rate'].values[0]
-    x1, y1 = upper['days'].values[0], upper['rate'].values[0]
+    x0, y0 = lower[days_var].values[0], lower['rate'].values[0]
+    x1, y1 = upper[days_var].values[0], upper['rate'].values[0]
 
     # Perform linear interpolation
     if x0 == x1:
@@ -579,41 +630,39 @@ def interpolated_ZCY(ZCY_date, target_days, date = None, filter_date = True):
         return y0 + (y1 - y0) * (target_days - x0) / (x1 - x0)
 
 
-# likely irrelevant now.
-def interpolated_FW(FW_date, target_days, date = None, ticker=None, filter_date = True):
-    # # Filter the DataFrame for the given date
-    # FW_date = FW_curves
-    # if filter_date == False:
-    #     FW_date = FW_curves[(FW_curves['date'] == date)]
-    # if ticker != None:
-    #     FW_date = FW_date[(FW_date['ticker'] == ticker)]
-    # if FW_date.empty:
-    #     raise ValueError(f"No data available for the date {date}")
-    #
-    # # Sort the DataFrame by days to find the nearest points
-    # # FW_date = FW_date.sort_values(by='days')
-
-    # Find the two nearest points
-    lower = FW_date[FW_date['days'] <= target_days].tail(1)
-    upper = FW_date[FW_date['days'] >= target_days].head(1)
-
-    if lower.empty or upper.empty:
-        raise ValueError(f"Not enough data points to interpolate for {target_days} days")
-
-    # Extract the days and forward prices for interpolation
-    x0, y0 = lower['days'].values[0], lower['forwardprice'].values[0]
-    x1, y1 = upper['days'].values[0], upper['forwardprice'].values[0]
-
-    # Perform linear interpolation
-    if x0 == x1:
-        return y0
-    else:
-        return y0 + (y1 - y0) * (target_days - x0) / (x1 - x0)
+# # likely irrelevant now.
+# def interpolated_FW(FW_date, target_days, date = None, ticker=None, filter_date = True):
+#     # # Filter the DataFrame for the given date
+#     # FW_date = FW_curves
+#     # if filter_date == False:
+#     #     FW_date = FW_curves[(FW_curves['date'] == date)]
+#     # if ticker != None:
+#     #     FW_date = FW_date[(FW_date['ticker'] == ticker)]
+#     # if FW_date.empty:
+#     #     raise ValueError(f"No data available for the date {date}")
+#     #
+#     # # Sort the DataFrame by days to find the nearest points
+#     # # FW_date = FW_date.sort_values(by='days')
+#
+#     # Find the two nearest points
+#     lower = FW_date[FW_date['days'] <= target_days].tail(1)
+#     upper = FW_date[FW_date['days'] >= target_days].head(1)
+#
+#     if lower.empty or upper.empty:
+#         raise ValueError(f"Not enough data points to interpolate for {target_days} days")
+#
+#     # Extract the days and forward prices for interpolation
+#     x0, y0 = lower['days'].values[0], lower['forwardprice'].values[0]
+#     x1, y1 = upper['days'].values[0], upper['forwardprice'].values[0]
+#
+#     # Perform linear interpolation
+#     if x0 == x1:
+#         return y0
+#     else:
+#         return y0 + (y1 - y0) * (target_days - x0) / (x1 - x0)
 
 
 from tqdm import tqdm
-
-
 
 
 def high_low_swap_rates(summary_dly_df, od_rdy, n_points=200):
@@ -650,7 +699,13 @@ def high_low_swap_rates(summary_dly_df, od_rdy, n_points=200):
     return summary_dly_df
 
 def interpolate_swaps_and_returns(summary_dly_df):
-    T = 30
+
+    if days_type() == "c_":
+        T = 30
+    elif days_type() == "t_":
+        T = 21
+
+    # T = 30
     t = 0
     T1 = summary_dly_df["low days"]
     T2 = summary_dly_df["high days"]
@@ -673,13 +728,18 @@ def interpolate_swaps_and_returns(summary_dly_df):
     # summary_dly_df["SW_1_30"] = summary_dly_df.groupby("ticker")["SW_0_29"].shift(-1)
 
     buy_price = summary_dly_df["SW_m1_29"]
-    sell_price = (1/30) * (summary_dly_df["squared_return"] + 29 * summary_dly_df["SW_0_29"])
+
+    if days_type() == "c_":
+        sell_price = (1/30) * (summary_dly_df["squared_return"] + 29 * summary_dly_df["SW_0_29"])
+    elif days_type() == "t_":
+        sell_price = (1/21) * (summary_dly_df["squared_return"] + 20 * summary_dly_df["SW_0_29"])
+
 
     summary_dly_df["SW_day"] = sell_price - buy_price
-    summary_dly_df['SW_day_RF'] = sell_price - (1 + RF) * buy_price
+    # summary_dly_df['SW_day_RF'] = sell_price - (1 + RF) * buy_price
 
     summary_dly_df['SW_day_ln_ret'] = np.log(np.maximum(sell_price, 0.001) / np.maximum(buy_price, 0.001))
-    summary_dly_df["SW_day_ln_ret_RF"] = np.log(np.maximum(sell_price, 0.001) / np.maximum((1 + RF) * buy_price, 0.001))
+    # summary_dly_df["SW_day_ln_ret_RF"] = np.log(np.maximum(sell_price, 0.001) / np.maximum((1 + RF) * buy_price, 0.001))
 
     summary_dly_df["SW_sell"] = sell_price
     summary_dly_df["SW_buy"] = buy_price
@@ -711,8 +771,11 @@ def process_od_rdy_worker(args):
 
 
 def process_od_rdy_parallel(od_rdy, calc_func, **kwargs):
+
+    days_var = days_type() + "days"
+
     # Group by unique combination of ticker, date, and days
-    groups = [group for _, group in od_rdy.groupby(["ticker", "date", "days"], group_keys=False)]
+    groups = [group for _, group in od_rdy.groupby(["ticker", "date", days_var], group_keys=False)]
     worker_args = [(group, calc_func, kwargs) for group in groups]
 
     with concurrent.futures.ProcessPoolExecutor() as executor:
@@ -725,8 +788,11 @@ def process_od_rdy_parallel(od_rdy, calc_func, **kwargs):
 
 
 def process_od_rdy(od_rdy, calc_func, **kwargs):
+
+    days_var = days_type() + "days"
+
     # Group by the unique combination of ticker, date, and days
-    grouped = list(od_rdy.groupby(["ticker", "date", "days"], group_keys=False))
+    grouped = list(od_rdy.groupby(["ticker", "date", days_var], group_keys=False))
 
     # Initialize tqdm for progress tracking
     results = []
@@ -747,12 +813,15 @@ def replicate_SW(group, n_points = 100):
 
     Returns the group with a new column 'var_swap_rate'.
     """
+
+    TTM_var = days_type() + "TTM"
+
     group = group.copy()
 
     # Extract relevant parameters (assuming they're constant within this group)
     F = group["F"].iloc[0]
     r = group["r"].iloc[0]
-    T = group["days"].iloc[0] / 365  # T in years (e.g. days / 365)
+    T = group[TTM_var].iloc[0]  # T in years (e.g. days / 365)
 
     # 1) Average implied volatility as a rough stdev estimate
     #    (This is the "standard deviation" used to define ±8 stdev range.)
