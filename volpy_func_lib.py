@@ -546,24 +546,27 @@ def process_group_activity_summary(group):
     current_ticker = group["ticker"].iloc[0]
     summary = {}
 
+    # Initialiser nye flagkolonner
     group["low"] = False
     group["high"] = False
 
+    # Få sorteret unikke dage for denne (date, ticker) gruppe
     unique_days = np.sort(group[days_var].unique())
     summary["#days"] = len(unique_days)
 
+    # Inaktiv hvis der er færre end 2 unikke dage
     if len(unique_days) < 2:
         summary["Active"] = False
         summary["Inactive reason"] = "unique(_days) < 2"
         return group, summary
 
-    # Justering med x: 
+    # Inaktiv hvis den mindste dag er for stor, med justering baseret på x
     if unique_days[0] > 90 - x * 90 * 0.3:
         summary["Active"] = False
         summary["Inactive reason"] = "min days > 90"
         return group, summary
 
-    # Resten af logikken kan herefter tilpasses, fx:
+    # Vælg de to dage, der skal bruges – opdel unikke dage i dem under og over 30 dage
     days_below_30 = unique_days[(unique_days <= 30) & (unique_days > 8)]
     days_above_30 = unique_days[unique_days > 30]
     
@@ -582,9 +585,10 @@ def process_group_activity_summary(group):
     summary["low days"] = low_2_days[0]
     summary["high days"] = low_2_days[1]
 
+    # Check unikke strike-antals for de valgte dage; kræv mindst 3
     active = True
     for day, label in zip(low_2_days, ["low", "high"]):
-        num_strikes = group.loc[group["days"] == day, "K"].nunique()
+        num_strikes = group.loc[group[days_var] == day, "K"].nunique()
         summary[f"{label} #K"] = num_strikes
         if num_strikes < 3:
             active = False
@@ -597,6 +601,7 @@ def process_group_activity_summary(group):
     summary["Active"] = True
     summary["Inactive reason"] = ""
 
+    # Sæt 'low' og 'high' flags for de respektive rækker
     group.loc[group[days_var] == low_2_days[0], "low"] = True
     group.loc[group[days_var] == low_2_days[1], "high"] = True
 
