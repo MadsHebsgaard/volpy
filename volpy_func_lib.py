@@ -463,54 +463,125 @@ def add_bid_mid_ask_IV(od, IV_type):
     IV = vectorized_iv(F, K, T, market_price, cp_flag)
     return IV
 
-def process_group_activity_summary(group):
+# def process_group_activity_summary(group):
 
-    days_var = days_type() + "days"
+#     days_var = days_type() + "days"
+
+#     if days_type() == "t_" and clean_t_days():
+#         x = 1
+#     else:
+#         x = 0
+
+#     # Extract the current date and ticker from the group
+#     current_date = group["date"].iloc[0]
+#     current_ticker = group["ticker"].iloc[0]
+#     summary = {}
+
+#     # Initialize the new columns to False
+#     group["low"] = False
+#     group["high"] = False
+
+#     # Get sorted unique days for this (date, ticker) pair
+#     unique_days = np.sort(group[days_var].unique())
+#     summary["#days"] = len(unique_days)
+
+#     # Inactive if there are fewer than 2 unique days
+#     if len(unique_days) < 2:
+#         summary["Active"] = False
+#         summary["Inactive reason"] = "unique(_days) < 2"
+#         return group, summary
+
+#     # Inactive if the minimum day is > 90
+#     if unique_days[0] > 90 - x*90*0.3: #todo: change to above something like x_TTM > 0.25
+#         summary["Active"] = False
+#         summary["Inactive reason"] = "min days > 90"
+#         return group, summary
+
+#     # Select two lowest days above 7 days.
+#     # If the smallest day is <= 8 and at least 3 unique days exist, skip it.
+#     low_2_days = list(unique_days[:2])
+#     if low_2_days[0] <= 8 - x*2: #todo: change to above something like <= 6 || <= 8 depending on 'days_type'
+#         if len(unique_days) < 3:
+#             summary["Active"] = False
+#             summary["Inactive reason"] = "min days <= 8 & len < 3"
+#             return group, summary
+#         low_2_days = list(unique_days[1:3])
+
+#     summary["low days"] = low_2_days[0]
+#     summary["high days"] = low_2_days[1]
+
+#     # Check unique strike counts for each selected day; require at least 3
+#     active = True
+#     for day, label in zip(low_2_days, ["low", "high"]):
+#         num_strikes = group.loc[group[days_var] == day, "K"].nunique()
+#         summary[f"{label} #K"] = num_strikes
+#         if num_strikes < 3:
+#             active = False
+#             summary["Active"] = False
+#             summary["Inactive reason"] = "unique(K) < 3"
+#     summary[f"#K"] = (summary[f"low #K"] + summary[f"high #K"]) / 2
+#     if not active:
+#         return group, summary
+
+#     summary["Active"] = True
+#     summary["Inactive reason"] = ""
+
+#     # Set the 'low' and 'high' flags for the corresponding rows
+#     group.loc[group[days_var] == low_2_days[0], "low"] = True
+#     group.loc[group[days_var] == low_2_days[1], "high"] = True
+
+#     return group, summary
+
+
+
+def process_group_activity_summary(group):
+    days_var = days_type() + "days"  # fx "t_days" eller "c_days"
 
     if days_type() == "t_" and clean_t_days():
         x = 1
     else:
         x = 0
 
-    # Extract the current date and ticker from the group
     current_date = group["date"].iloc[0]
     current_ticker = group["ticker"].iloc[0]
     summary = {}
 
-    # Initialize the new columns to False
     group["low"] = False
     group["high"] = False
 
-    # Get sorted unique days for this (date, ticker) pair
     unique_days = np.sort(group[days_var].unique())
     summary["#days"] = len(unique_days)
 
-    # Inactive if there are fewer than 2 unique days
     if len(unique_days) < 2:
         summary["Active"] = False
         summary["Inactive reason"] = "unique(_days) < 2"
         return group, summary
 
-    # Inactive if the minimum day is > 90
-    if unique_days[0] > 90 - x*90*0.3: #todo: change to above something like x_TTM > 0.25
+    # Justering med x: 
+    if unique_days[0] > 90 - x * 90 * 0.3:
         summary["Active"] = False
         summary["Inactive reason"] = "min days > 90"
         return group, summary
 
-    # Select two lowest days above 7 days.
-    # If the smallest day is <= 8 and at least 3 unique days exist, skip it.
-    low_2_days = list(unique_days[:2])
-    if low_2_days[0] <= 8 - x*2: #todo: change to above something like <= 6 || <= 8 depending on 'days_type'
-        if len(unique_days) < 3:
-            summary["Active"] = False
-            summary["Inactive reason"] = "min days <= 8 & len < 3"
-            return group, summary
-        low_2_days = list(unique_days[1:3])
+    # Resten af logikken kan herefter tilpasses, fx:
+    days_below_30 = unique_days[(unique_days <= 30) & (unique_days > 8)]
+    days_above_30 = unique_days[unique_days > 30]
+    
+    if len(days_below_30) > 0 and len(days_above_30) > 0:
+        low_2_days = [max(days_below_30), min(days_above_30)]
+    elif len(days_below_30) >= 2:
+        low_2_days = list(days_below_30[-2:])
+    elif len(days_above_30) >= 2:
+        low_2_days = list(days_above_30[:2])
+    
+    if len(unique_days) < 3 and unique_days[0] <= 8:
+        summary["Active"] = False
+        summary["Inactive reason"] = "min days <= 8 & len < 3"
+        return group, summary 
 
     summary["low days"] = low_2_days[0]
     summary["high days"] = low_2_days[1]
 
-    # Check unique strike counts for each selected day; require at least 3
     active = True
     for day, label in zip(low_2_days, ["low", "high"]):
         num_strikes = group.loc[group[days_var] == day, "K"].nunique()
@@ -526,11 +597,11 @@ def process_group_activity_summary(group):
     summary["Active"] = True
     summary["Inactive reason"] = ""
 
-    # Set the 'low' and 'high' flags for the corresponding rows
     group.loc[group[days_var] == low_2_days[0], "low"] = True
     group.loc[group[days_var] == low_2_days[1], "high"] = True
 
     return group, summary
+
 
 import concurrent.futures
 import load_clean_lib
