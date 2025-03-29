@@ -71,7 +71,8 @@ def load_option_data(file_path):
     total_calendar_days = (unique_calendar_days.max() - unique_calendar_days.min()).days + 1
 
     average_calendar_days_per_year = 365
-    average_trading_days_per_year = total_trading_days * (average_calendar_days_per_year / total_calendar_days)
+    cal_years_total = total_calendar_days / average_calendar_days_per_year
+    average_trading_days_per_year = total_trading_days / cal_years_total
 
     # Add the n_trading_day column to the DataFrame
     df["n_trading_day"] = df["date"].map(trading_day_map)
@@ -285,13 +286,13 @@ def calc_realized_var(returns_and_prices, first_day, last_day):
         (returns_and_prices['date'] >= first_day) & (returns_and_prices['date'] <= last_day)
     ].copy()
 
-    returns_and_prices = returns_and_prices[
-        ~((returns_and_prices['ticker'] == 'DJX') & (returns_and_prices['date'] < pd.to_datetime("1997-10-06")))
-    ].copy()
-
-    returns_and_prices = returns_and_prices[
-        ~((returns_and_prices['ticker'] == 'AMZN') & (returns_and_prices['date'] < pd.to_datetime("1997-11-19")))
-    ].copy()
+    # returns_and_prices = returns_and_prices[
+    #     ~((returns_and_prices['ticker'] == 'DJX') & (returns_and_prices['date'] < pd.to_datetime("1997-10-06")))
+    # ].copy()
+    #
+    # returns_and_prices = returns_and_prices[
+    #     ~((returns_and_prices['ticker'] == 'AMZN') & (returns_and_prices['date'] < pd.to_datetime("1997-11-19")))
+    # ].copy()
 
     # returns_and_prices["RV"] = returns_and_prices["RV_scaled"]
     # returns_and_prices.drop(['RV_scaled'], axis=1) # todo: make this always RV instead of new column and then rename and remove scaled
@@ -791,7 +792,9 @@ def interpolate_swaps_and_returns(summary_dly_df):
     SW2 = summary_dly_df["high SW"]
     RF = summary_dly_df["RF"]
 
-    summary_dly_df["SW_0_30"] = (1 / (T - t)) * (SW1 * (T1 - t) * (T2 - T) + SW2 * (T2 - t) * (T - T1)) / (T2 - T1)
+    # summary_dly_df["SW_0_30"] = (1 / (T - t)) * (SW1 * (T1 - t) * (T2 - T) + SW2 * (T2 - t) * (T - T1)) / (T2 - T1)
+    theta = (T - T1) / (T2 - T1)
+    summary_dly_df["SW_0_30"] = SW1 * (1-theta) + SW2 * theta
 
     summary_dly_df["SW_m30_0"] = summary_dly_df.groupby("ticker")["SW_0_30"].shift(30)
     summary_dly_df["RV_m30_0"] = summary_dly_df.groupby("ticker")["RV"].shift(30)
@@ -802,23 +805,19 @@ def interpolate_swaps_and_returns(summary_dly_df):
 
 
     summary_dly_df["SW_m1_29"] = summary_dly_df.groupby("ticker")["SW_0_30"].shift(1)
-    summary_dly_df["SW_0_29"] = (1 / (T - (t + 1))) * (SW1 * (T1 - (t + 1)) * (T2 - T) + SW2 * (T2 - (t + 1)) * (T - T1)) / (T2 - T1)
+    # summary_dly_df["SW_0_29"] = (1 / (T - t)) * (SW1 * (T1 - t) * (T2 - T) + SW2 * (T2 - t) * (T - T1)) / (T2 - T1)
+
+    theta = ((T-1) - T1) / (T2 - T1)
+    summary_dly_df["SW_0_29"] = SW1 * (1-theta) + SW2 * theta
     # summary_dly_df["SW_1_30"] = summary_dly_df.groupby("ticker")["SW_0_29"].shift(-1)
 
     buy_price = summary_dly_df["SW_m1_29"]
-
-    if days_type() == "c_":
-        sell_price = (1/30) * (summary_dly_df["squared_return"] + 29 * summary_dly_df["SW_0_29"])
-    elif days_type() == "t_":
-        sell_price = (1/21) * (summary_dly_df["squared_return"] + 20 * summary_dly_df["SW_0_29"])
-
-
+    sell_price = (1/T) * 252 * summary_dly_df["squared_return"] + (T-1)/T * summary_dly_df["SW_0_29"]
     summary_dly_df["SW_day"] = sell_price - buy_price
+
     # summary_dly_df['SW_day_RF'] = sell_price - (1 + RF) * buy_price
-
-    summary_dly_df['SW_day_ln_ret'] = np.log(np.maximum(sell_price, 0.001) / np.maximum(buy_price, 0.001))
+    # summary_dly_df['SW_day_ln_ret'] = np.log(np.maximum(sell_price, 0.001) / np.maximum(buy_price, 0.001))
     # summary_dly_df["SW_day_ln_ret_RF"] = np.log(np.maximum(sell_price, 0.001) / np.maximum((1 + RF) * buy_price, 0.001))
-
     summary_dly_df["SW_sell"] = sell_price
     summary_dly_df["SW_buy"] = buy_price
     # summary_dly_df["SW_return_day_scaled"] = summary_dly_df["SW_return_day"] / summary_dly_df["SW_m1_29"]

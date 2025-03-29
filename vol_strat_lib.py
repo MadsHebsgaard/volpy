@@ -4,22 +4,33 @@ import pandas as pd
 import numpy as np
 
 import load_clean_lib
+from global_settings import *
 
-
-def import_sum_raw(profile, om_folder):
-    om_folder = load_clean_lib.volpy_output_dir(profile, om_folder)
-
-    sum_df = pd.read_csv(f"{om_folder}/summary_dly.csv")
+def import_sum_raw(om_folder):
+    om_folder = load_clean_lib.volpy_output_dir(om_folder)
+    time_type = days_type()
+    sum_df = pd.read_csv(f"{om_folder}/{time_type}summary_dly.csv")
     sum_df["date"] = pd.to_datetime(sum_df["date"])
     sum_df[f"return_next"] = sum_df[f"return"].shift(-1)
 
-    od_raw = pd.read_csv(f"{om_folder}/od_raw.csv")
+    od_raw = pd.read_csv(f"{om_folder}/{time_type}od_raw.csv")
     od_raw['optionid'] = od_raw['optionid'].astype(int)
     od_raw["date"] = pd.to_datetime(od_raw["date"])
     return sum_df, od_raw
 
 
+def import_sum(om_folder):
+    om_folder = load_clean_lib.volpy_output_dir(om_folder)
+    time_type = days_type()
+    sum_df = pd.read_csv(f"{om_folder}/{time_type}summary_dly.csv")
+    sum_df["date"] = pd.to_datetime(sum_df["date"])
+    sum_df[f"return_next"] = sum_df[f"return"].shift(-1)
+    return sum_df
+
+
 def create_od_hl(od_raw, sum_df, price_type, IV_type):
+    days_var = days_type() + "days"
+
     od_raw['price'] = od_raw[price_type]
 
     od_hl = od_raw.merge(
@@ -29,8 +40,8 @@ def create_od_hl(od_raw, sum_df, price_type, IV_type):
     )
 
     # Create two new columns 'high' and 'low'
-    od_hl['low'] = od_hl['days'] == od_hl['low days']
-    od_hl['high'] = od_hl['days'] == od_hl['high days']
+    od_hl['low'] = od_hl[days_var] == od_hl['low days']
+    od_hl['high'] = od_hl[days_var] == od_hl['high days']
     od_hl = od_hl[(od_hl['low']) | (od_hl['high'])]
     od_hl = od_hl.sort_values(by=['ticker', 'date'], ascending=True)
 
@@ -61,11 +72,13 @@ from scipy.stats import norm
 
 
 def process_options_ATM(df, low_high, cp_value, prefix):
+    TTM_var = days_type() + "TTM"
+
     # Filter and sort options
     filtered = df[(df[low_high]) & (df['cp_flag'] == cp_value)].copy()
     filtered = filtered.sort_values(['ticker', 'date', 'abs(moneyness)'],
                                     ascending=[True, True, True])
-    filtered["T"] = filtered["days"] / 365
+    filtered["T"] = filtered[TTM_var]
 
     # Calculate d1 and delta
     filtered['d1'] = (np.log(filtered["F"] / filtered["K"]) + 0.5 * filtered["IV"] ** 2 * filtered["T"]) / (
