@@ -584,7 +584,7 @@ def process_group_activity_summary(group):
 
     active = True
     for day, label in zip(low_2_days, ["low", "high"]):
-        num_strikes = group.loc[group[days_var] == day, "K"].nunique()
+        num_strikes = group.loc[group["days"] == day, "K"].nunique()
         summary[f"{label} #K"] = num_strikes
         if num_strikes < 3:
             active = False
