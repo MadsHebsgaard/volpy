@@ -15,7 +15,6 @@ clean_t_days = global_settings.clean_t_days
 
 def load_option_data(file_path):
     import os
-    print("file_path is", file_path)
     columns_to_load = [
         "ticker",
         "optionid",

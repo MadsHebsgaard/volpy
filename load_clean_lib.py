@@ -3,6 +3,7 @@ from pathlib import Path
 import volpy_func_lib as vp
 import pandas as pd
 
+from global_settings import *
 
 import importlib
 import global_settings
@@ -10,7 +11,8 @@ importlib.reload(global_settings)
 days_type = global_settings.days_type
 
 
-def dirs(profile):
+def dirs():
+    profile = my_profile()
     if profile == "Mads":
         Option_metrics_path = Path(r"D:\Finance Data\OptionMetrics")
     elif profile == "Axel":
@@ -27,29 +29,30 @@ def dirs(profile):
     }
     return dir
 
-def Option_metrics_path_from_profile(profile):
+def Option_metrics_path_from_profile():
+    profile = my_profile()
     if profile == "Mads":
         return Path(r"D:\Finance Data\OptionMetrics")
     elif profile == "Axel":
         return Path(r"C:\Users\axell\Desktop\CBS\data\OptionMetrics")
     else:
-        print("choose viable profile such as 'Axel' or 'Mads'")
+        print("choose viable profile such as 'Axel' or 'Mads' in global settings")
     return
 
-def volpy_output_dir(profile, om_folder):
-    om_dir = Option_metrics_path_from_profile(profile)
+def volpy_output_dir(om_folder):
+    om_dir = Option_metrics_path_from_profile()
     return om_dir / "volpy data output" / om_folder
 
 
-def load_od_FW_ZCY(profile, om_folder="i4s4", tickers=None):
+def load_od_FW_ZCY(om_folder="i4s4", tickers=None):
     """Loader optionsdata, forward priser, returns og yield curves."""
-    om_dir = Option_metrics_path_from_profile(profile)
+    om_dir = Option_metrics_path_from_profile()
     dir = om_dir / om_folder
 
     if not dir.is_dir():
         print("The specified OptionMetrics folder 'om_folder' does not exist, add the folder to OptionMetrics directorary")
 
-    volpy_output_dir(profile, om_folder).mkdir(parents=True, exist_ok=True)
+    volpy_output_dir(om_folder).mkdir(parents=True, exist_ok=True)
 
     # Load hver dataset direkte
     od = vp.load_option_data(dir / "option data.csv")
@@ -114,10 +117,10 @@ def summary_dly_df_creator(od):
 
     return summary_dly_df
 
-def load_clean_and_prepare_od(om_folder, profile="Mads", tickers=None, first_day=None, last_day=None, IV_type = "od"):
+def load_clean_and_prepare_od(om_folder, tickers=None, first_day=None, last_day=None, IV_type = "od"):
     # load data
     print(f"{days_type()} was selected in global_settings.py")
-    od, FW, ZCY_curves, returns_and_prices = load_od_FW_ZCY(profile, om_folder, tickers=tickers)
+    od, FW, ZCY_curves, returns_and_prices = load_od_FW_ZCY(om_folder, tickers=tickers)
 
 
     if first_day is None:   first_day = od["date"].min()
