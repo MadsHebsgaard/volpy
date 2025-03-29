@@ -14,6 +14,8 @@ clean_t_days = global_settings.clean_t_days
 
 
 def load_option_data(file_path):
+    import os
+    print("file_path is", file_path)
     columns_to_load = [
         "ticker",
         "optionid",
@@ -53,7 +55,8 @@ def load_option_data(file_path):
 
     # load valid dates
     unique_calendar_days = df["date"].drop_duplicates().sort_values()  # [df["ticker"] == "SPX"]
-    valid_dates = pd.read_csv(r"D:\Finance Data\OptionMetrics\dates.csv", usecols=["DATE"], parse_dates=["DATE"])
+    valid_dates_path = os.path.join(os.path.dirname(os.path.dirname(file_path)), "dates.csv")
+    valid_dates = pd.read_csv(valid_dates_path, usecols=["DATE"], parse_dates=["DATE"])
     valid_dates.rename(columns={"DATE": "date"}, inplace=True)
     valid_dates = valid_dates[valid_dates["date"] >= unique_calendar_days.iloc[0]]
     valid_dates = valid_dates["date"]
