@@ -3,6 +3,13 @@ from pathlib import Path
 import volpy_func_lib as vp
 import pandas as pd
 
+
+import importlib
+import global_settings
+importlib.reload(global_settings)
+days_type = global_settings.days_type
+
+
 def dirs(profile):
     if profile == "Mads":
         Option_metrics_path = Path(r"D:\Finance Data\OptionMetrics")
@@ -46,6 +53,7 @@ def load_od_FW_ZCY(profile, om_folder="i4s4", tickers=None):
 
     # Load hver dataset direkte
     od = vp.load_option_data(dir / "option data.csv")
+
     FW = vp.load_forward_price(dir / "forward price.csv")
     ret = vp.load_returns_and_price(dir / "returns and stock price.csv")
     ZCY_curves = vp.load_ZC_yield_curve(dir / "ZC yield curve.csv")
@@ -60,21 +68,24 @@ def load_od_FW_ZCY(profile, om_folder="i4s4", tickers=None):
 
 
 def clean_od(od, first_day = pd.to_datetime("1996-01-04"), last_day = pd.to_datetime("2003-02-28")):
+
+    days_var = days_type() + "days"
+
     # od = od.dropna(subset=["K", "IV_om", "cp_flag"])
-    # od = od[od["days"] <= 365]
+    # od = od[od["c_days"] <= 365]
     od["spread"] = od["ask"] - od["bid"]
     od["mid"] = od["bid"] + od["spread"] / 2
     od = (
         od
         .dropna(subset=["K", "IV_om", "cp_flag"])
-        .query("days <= 365 and spread > 0 and bid > 0")
+        .query(f"{days_var} <= 365 and spread > 0 and bid > 0")
     )
     # od = od[od["volume"] > 5000]
 
     # od = od[(od["date"] >= first_day) & (od["date"] <= last_day)].sort_values(
     #     by="date").reset_index(drop=True)
     od = od[(od["date"] >= first_day) & (od["date"] <= last_day)].sort_values(
-        by=["date", "ticker", "days"]
+        by=["date", "ticker", "c_days"]
     ).reset_index(drop=True)
 
     return od
@@ -103,16 +114,18 @@ def summary_dly_df_creator(od):
 
     return summary_dly_df
 
-
 def load_clean_and_prepare_od(om_folder, profile="Mads", tickers=None, first_day=None, last_day=None, IV_type = "od"):
     # load data
+    print(f"{days_type()} was selected in global_settings.py")
     od, FW, ZCY_curves, returns_and_prices = load_od_FW_ZCY(profile, om_folder, tickers=tickers)
+
 
     if first_day is None:   first_day = od["date"].min()
     if last_day is None:    last_day = od["date"].max()
 
     # add forward (before cleaning such that od_raw has the forward rate, used in options trats for ATM options that might be slightly ITM)
     od = vp.add_FW_to_od(od, FW)
+    # print(od["F"])
 
     # add IV to options (bid/ask/mid/om)
     od["IV"] = vp.add_bid_mid_ask_IV(od, IV_type)
@@ -121,12 +134,14 @@ def load_clean_and_prepare_od(om_folder, profile="Mads", tickers=None, first_day
 
     # clean data (should be looked upon)
     od = clean_od(od, first_day=first_day, last_day=last_day)
-
+    # print(od.shape)
     # remove if ITM
     od = od.loc[((od["F"] < od["K"]) & (od["cp_flag"] == "C")) | ((od["F"] > od["K"]) & (od["cp_flag"] == "P"))]
+    # print(od.shape, "sdsfd")
 
     # add r to options
     od = vp.add_r_to_od_parallel(od, ZCY_curves)
+    # print(od.shape)
 
     return od, returns_and_prices, od_raw
 
