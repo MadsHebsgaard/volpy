@@ -46,7 +46,6 @@ def create_od_hl(od_raw, sum_df, price_type, IV_type):
     od_hl = od_hl.sort_values(by=['ticker', 'date'], ascending=True)
 
     od_hl["moneyness"] = np.log(od_hl["K"] / od_hl["F"])
-    od_hl["abs(moneyness)"] = np.abs(od_hl["moneyness"])
     od_hl["IV"] = od_hl[f"IV_{IV_type}"]
 
     return od_hl
@@ -71,12 +70,17 @@ def add_F_to_sum_df(od_hl, sum_df):
 from scipy.stats import norm
 
 
-def process_options_ATM(df, low_high, cp_value, prefix):
+def process_options_ATM(df, low_high, cp_value, prefix, alpha):
     TTM_var = days_type() + "TTM"
 
     # Filter and sort options
     filtered = df[(df[low_high]) & (df['cp_flag'] == cp_value)].copy()
-    filtered = filtered.sort_values(['ticker', 'date', 'abs(moneyness)'],
+
+    is_call = 2 * (df['cp_flag'] == "C") - 1
+    filtered["abs(moneyness+-alpha)"] = np.abs(filtered["moneyness"] - is_call * alpha)
+    filtered["fit_error"] = filtered["abs(moneyness+-alpha)"]
+
+    filtered = filtered.sort_values(['ticker', 'date', 'fit_error'],
                                     ascending=[True, True, True])
     filtered["T"] = filtered[TTM_var]
 
@@ -90,7 +94,7 @@ def process_options_ATM(df, low_high, cp_value, prefix):
 
     # Create ranks and filter top 2
     filtered['rank'] = filtered.groupby(['ticker', 'date']).cumcount() + 1
-    ranked = filtered[filtered['rank'] <= 2].copy()
+    ranked = filtered[filtered['rank'] <= 1].copy()
 
     # Convert optionid to integer
     ranked['optionid'] = ranked['optionid'].astype(int)
@@ -104,7 +108,10 @@ def process_options_ATM(df, low_high, cp_value, prefix):
     )
 
     # Flatten multi-index columns
-    pivot_df.columns = [f'{prefix}_{col}_{rank}' for col, rank in pivot_df.columns]
+    if alpha == 0:
+        pivot_df.columns = [f'{prefix}_ATM_{col}' for col, rank in pivot_df.columns]
+    else:
+        pivot_df.columns = [f'{prefix}_OTM_{round(alpha*100)}%_{col}' for col, rank in pivot_df.columns]
     return pivot_df.reset_index()
 
 
@@ -126,11 +133,18 @@ def add_next_prices(sum_df, next_lookup):
     return sum_df
 
 
-def T_day_interpolation(T1, T2, r1, r2, T = 30):
+def T_day_interpolation(T1, T2, r1, r2):
+    if days_type() == "t_":
+        T = 21
+    elif days_type() == "c_":
+        T = 30
+    else:
+        print("days_type() is neither t_ nor c_")
+        T = np.nan
     return (r1 * np.abs(T2 - T) + r2 * np.abs(T1 - T)) / (np.abs(T2 - T) + np.abs(T1 - T))
 
 
-def add_current_option_info(sum_df, od_hl):
+def add_current_option_info(sum_df, od_hl, moneyness):
     '''
     Find and add ATM options to sum_df
     '''
@@ -143,8 +157,8 @@ def add_current_option_info(sum_df, od_hl):
     ]
 
     # Process all combinations
-    pivoted_dfs = [process_options_ATM(od_hl, low_high, cp_flag, prefix)
-                   for low_high, cp_flag, prefix in configs]
+    pivoted_dfs = [process_options_ATM(od_hl, low_high, cp_flag, prefix, alpha)
+                   for low_high, cp_flag, prefix in configs for alpha in [0, moneyness]]
 
     # Merge all results
     for p_df in pivoted_dfs:
@@ -166,48 +180,53 @@ def add_next_prices_to_sum(sum_df, od_raw):
     return sum_df
 
 
-def add_ATM_options_to_sum_df(sum_df, od_hl, od_raw):
+def add_ATM_options_to_sum_df(sum_df, od_hl, od_raw, moneyness):
     '''
     Add options and their future value to sum_df
     '''
-    sum_df = add_current_option_info(sum_df, od_hl)
+    sum_df = add_current_option_info(sum_df, od_hl, moneyness)
     sum_df = add_next_prices_to_sum(sum_df, od_raw)
     return sum_df
 
 
-def add_put_and_call_sgy(df):
+def add_put_and_call_sgy(df, OTM_moneyness = None):
+    if OTM_moneyness == None:
+        OTM_str = "ATM"
+        OTM_simple = OTM_str
+    else:
+        OTM_str = f"OTM_{round(OTM_moneyness * 100)}%"
+        OTM_simple = "OTM"
+
     for put_call in ["put", "call"]:
         for low_high in ["low", "high"]:
-            df[f"free_{low_high}_{put_call}"] = (
-                    df[f"{low_high}_{put_call}_1_price_next"] - (1 + df[f"RF"]) * df[f"{low_high}_{put_call}_price_1"]
+            df[f"free_{low_high}_{put_call}_{OTM_str}"] = (
+                    df[f"{low_high}_{put_call}_{OTM_str}_price_next"] - (1 + df[f"RF"]) * df[f"{low_high}_{put_call}_{OTM_str}_price"]
             ).shift(1)
 
     # 30 day version
     T1 = df["low days"].shift(1)
     T2 = df["high days"].shift(1)
     for put_call in ["put", "call"]:
-        df[f"30_{put_call}"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_low_{put_call}"],
-                                                      r2=df[f"free_high_{put_call}"])
+        # df[f"30_{put_call}_{OTM_str}"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_low_{put_call}_{OTM_str}"],
+        #                                               r2=df[f"free_high_{put_call}_{OTM_str}"])
+        df[f"30_{put_call}_{OTM_simple}"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_low_{put_call}_{OTM_str}"],
+                                                      r2=df[f"free_high_{put_call}_{OTM_str}"])
     return df
 
 
-def add_straddle_sgy(df):
-    for low_high in ["low", "high"]:
-        df[f"free_{low_high}_straddle"] = df[f"free_{low_high}_put"] + df[f"free_{low_high}_call"]
+def add_delta_put_and_call_sgy(df, OTM_moneyness = None):
+    if OTM_moneyness == None:
+        OTM_str = "ATM"
+        OTM_simple = OTM_str
+    else:
+        OTM_str = f"OTM_{round(OTM_moneyness * 100)}%"
+        OTM_simple = "OTM"
 
-    # 30 day version
-    T1 = df["low days"].shift(1)
-    T2 = df["high days"].shift(1)
-    df["30_straddle"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_low_straddle"], r2=df[f"free_high_straddle"])
-    return df
-
-
-def add_delta_put_and_call_sgy(df):
     for put_call in ["put", "call"]:
         for low_high in ["low", "high"]:
-            df[f"free_D_{low_high}_{put_call}"] = (
-                    df[f"{low_high}_{put_call}_1_price_next"] - (1 + df[f"RF"]) * df[f"{low_high}_{put_call}_price_1"] -
-                    df[f"{low_high}_{put_call}_delta_1"] * df[f"close"] * (df[f"return"].shift(-1) - df[f"RF"])
+            df[f"free_{low_high}_{put_call}_D_{OTM_str}"] = (
+                    df[f"{low_high}_{put_call}_{OTM_str}_price_next"] - (1 + df[f"RF"]) * df[f"{low_high}_{put_call}_{OTM_str}_price"] -
+                    df[f"{low_high}_{put_call}_{OTM_str}_delta"] * df[f"close"] * (df[f"return"].shift(-1) - df[f"RF"])
             # Delta hedge (self financed)
             ).shift(1)
 
@@ -215,22 +234,119 @@ def add_delta_put_and_call_sgy(df):
     T1 = df["low days"].shift(1)
     T2 = df["high days"].shift(1)
     for put_call in ["put", "call"]:
-        df[f"30_D_{put_call}"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_D_low_{put_call}"],
-                                                        r2=df[f"free_D_high_{put_call}"])
+        # df[f"30_{put_call}_D_{OTM_str}"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_low_{put_call}_D_{OTM_str}"],
+        #                                                 r2=df[f"free_high_{put_call}_D_{OTM_str}"])
+        df[f"30_{put_call}_D_{OTM_simple}"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_low_{put_call}_D_{OTM_str}"],
+                                                        r2=df[f"free_high_{put_call}_D_{OTM_str}"])
     return df
 
 
-def add_delta_straddle_sgy(df):
+# def add_straddle_sgy_old(df):
+#     for low_high in ["low", "high"]:
+#         df[f"free_{low_high}_straddle"] = df[f"free_{low_high}_put_ATM"] + df[f"free_{low_high}_call_ATM"]
+#
+#     # 30 day version
+#     T1 = df["low days"].shift(1)
+#     T2 = df["high days"].shift(1)
+#     df["30_straddle"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_low_straddle"], r2=df[f"free_high_straddle"])
+#     return df
+
+def add_straddle_sgy(df):
+    add_strangle_sgy(df) #Passed without 'OTM_moneyness'
+    return df
+
+def add_strangle_sgy(df, OTM_moneyness = None):
+    if OTM_moneyness == None:
+        OTM_str = "ATM"
+        sgy_name = "straddle"
+        sgy_name_simple = sgy_name
+    else:
+        OTM_str = f"OTM_{round(OTM_moneyness * 100)}%"
+        sgy_name = f"strangle_{round(OTM_moneyness * 100)}%"
+        sgy_name_simple = "strangle"
+
     for low_high in ["low", "high"]:
-        df[f"free_D_{low_high}_straddle"] = df[f"free_D_{low_high}_put"] + df[f"free_D_{low_high}_call"]
+        df[f"free_{low_high}_{sgy_name}"] = df[f"free_{low_high}_put_{OTM_str}"] + df[f"free_{low_high}_call_{OTM_str}"]
 
     # 30 day version
     T1 = df["low days"].shift(1)
     T2 = df["high days"].shift(1)
-    df["30_D_straddle"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_D_low_straddle"],
-                                                 r2=df[f"free_D_high_straddle"])
+    # df[f"30_{sgy_name}"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_low_{sgy_name}"], r2=df[f"free_high_{sgy_name}"])
+    df[f"30_{sgy_name_simple}"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_low_{sgy_name}"], r2=df[f"free_high_{sgy_name}"])
     return df
 
+
+def add_butterfly_spread_sgy(df, OTM_moneyness):
+    ATM_str = f"ATM"
+    OTM_str = f"OTM_{round(OTM_moneyness * 100)}%"
+    sgy_name = f"butterfly_spread_{round(OTM_moneyness * 100)}%"
+    sgy_name_simple = "butterfly_spread"
+
+    for low_high in ["low", "high"]:
+        ATM_payoff = df[f"free_{low_high}_put_{ATM_str}"] + df[f"free_{low_high}_call_{ATM_str}"]
+        OTM_payoff = df[f"free_{low_high}_put_{OTM_str}"] + df[f"free_{low_high}_call_{OTM_str}"]
+        df[f"free_{low_high}_{sgy_name}"] = ATM_payoff - OTM_payoff
+
+    # 30 day version
+    T1 = df["low days"].shift(1)
+    T2 = df["high days"].shift(1)
+    # df[f"30_{sgy_name}"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_low_{sgy_name}"], r2=df[f"free_high_{sgy_name}"])
+    df[f"30_{sgy_name_simple}"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_low_{sgy_name}"], r2=df[f"free_high_{sgy_name}"])
+    return df
+
+def add_delta_butterfly_spread_sgy(df, OTM_moneyness):
+    ATM_str = f"D_ATM"
+    OTM_str = f"D_OTM_{round(OTM_moneyness * 100)}%"
+    sgy_name = f"D_butterfly_spread_{round(OTM_moneyness * 100)}%"
+    sgy_name_simple = ("D_butterfly_spread")
+
+    for low_high in ["low", "high"]:
+        ATM_payoff = df[f"free_{low_high}_put_{ATM_str}"] + df[f"free_{low_high}_call_{ATM_str}"] # buy straddle
+        OTM_payoff = df[f"free_{low_high}_put_{OTM_str}"] + df[f"free_{low_high}_call_{OTM_str}"] # sell strangle
+        df[f"free_{low_high}_{sgy_name}"] = ATM_payoff - OTM_payoff
+
+    # 30 day version
+    T1 = df["low days"].shift(1)
+    T2 = df["high days"].shift(1)
+    # df[f"30_{sgy_name}"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_low_{sgy_name}"], r2=df[f"free_high_{sgy_name}"])
+    df[f"30_{sgy_name_simple}"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_low_{sgy_name}"], r2=df[f"free_high_{sgy_name}"])
+    return df
+
+
+# def add_delta_straddle_sgy_old(df):
+#     for low_high in ["low", "high"]:
+#         df[f"free_D_{low_high}_straddle"] = df[f"free_D_{low_high}_put"] + df[f"free_D_{low_high}_call"]
+#
+#     # 30 day version
+#     T1 = df["low days"].shift(1)
+#     T2 = df["high days"].shift(1)
+#     df["30_D_straddle"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_D_low_straddle"],
+#                                                  r2=df[f"free_D_high_straddle"])
+#     return df
+
+def add_delta_strangle_sgy(df, OTM_moneyness = None):
+    if OTM_moneyness == None:
+        OTM_str = "D_ATM"
+        sgy_name = "D_straddle"
+        sgy_name_simple = sgy_name
+    else:
+        OTM_str = f"D_OTM_{round(OTM_moneyness * 100)}%"
+        sgy_name = f"D_strangle_{round(OTM_moneyness * 100)}%"
+        sgy_name_simple = "D_strangle"
+
+    for low_high in ["low", "high"]:
+        df[f"free_{low_high}_{sgy_name}"] = df[f"free_{low_high}_put_{OTM_str}"] + df[f"free_{low_high}_call_{OTM_str}"]
+
+    # 30 day version
+    T1 = df["low days"].shift(1)
+    T2 = df["high days"].shift(1)
+    # df[f"30_{sgy_name}"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_low_{sgy_name}"], r2=df[f"free_high_{sgy_name}"])
+    df[f"30_{sgy_name_simple}"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_low_{sgy_name}"], r2=df[f"free_high_{sgy_name}"])
+    return df
+
+def add_delta_straddle_sgy(df):
+    add_delta_strangle_sgy(df) #Passed without 'OTM_moneyness'
+    return df
 
 def add_self_financed_stock_sgy(df):
     for ticker in df['ticker'].unique():

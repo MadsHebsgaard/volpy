@@ -73,6 +73,7 @@ def load_option_data(file_path):
     average_calendar_days_per_year = 365
     cal_years_total = total_calendar_days / average_calendar_days_per_year
     average_trading_days_per_year = total_trading_days / cal_years_total
+    # print("average_trading_days_per_year", average_trading_days_per_year)
 
     # Add the n_trading_day column to the DataFrame
     df["n_trading_day"] = df["date"].map(trading_day_map)
@@ -812,7 +813,7 @@ def interpolate_swaps_and_returns(summary_dly_df):
     # summary_dly_df["SW_1_30"] = summary_dly_df.groupby("ticker")["SW_0_29"].shift(-1)
 
     buy_price = summary_dly_df["SW_m1_29"]
-    sell_price = (1/T) * 252 * summary_dly_df["squared_return"] + (T-1)/T * summary_dly_df["SW_0_29"]
+    sell_price = (1/T) * 252 * summary_dly_df["squared_return"] + (T-1)/T * summary_dly_df["SW_0_29"] #todo: change 252 for the actual true average trading days a year
     summary_dly_df["SW_day"] = sell_price - buy_price
 
     # summary_dly_df['SW_day_RF'] = sell_price - (1 + RF) * buy_price
