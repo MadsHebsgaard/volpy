@@ -128,3 +128,115 @@ def add_next_prices(sum_df, next_lookup):
 
 def T_day_interpolation(T1, T2, r1, r2, T = 30):
     return (r1 * np.abs(T2 - T) + r2 * np.abs(T1 - T)) / (np.abs(T2 - T) + np.abs(T1 - T))
+
+
+def add_current_option_info(sum_df, od_hl):
+    '''
+    Find and add ATM options to sum_df
+    '''
+    # Define processing configurations
+    configs = [
+        ('low', 'C', 'low_call'),
+        ('low', 'P', 'low_put'),
+        ('high', 'C', 'high_call'),
+        ('high', 'P', 'high_put'),
+    ]
+
+    # Process all combinations
+    pivoted_dfs = [process_options_ATM(od_hl, low_high, cp_flag, prefix)
+                   for low_high, cp_flag, prefix in configs]
+
+    # Merge all results
+    for p_df in pivoted_dfs:
+        sum_df = sum_df.merge(p_df, on=['ticker', 'date'], how='left')
+    return sum_df
+
+
+def add_next_prices_to_sum(sum_df, od_raw):
+    '''
+    Add next price of options to sum_df
+    '''
+    # Create next price lookup
+    od_sorted = od_raw.sort_values(['optionid', 'date']).copy()
+    od_sorted['price_next'] = od_sorted.groupby('optionid')['price'].shift(-1)
+    next_price_lookup = od_sorted[['ticker', 'date', 'optionid', 'price_next']]
+
+    # Add next prices to all option columns
+    sum_df = add_next_prices(sum_df, next_price_lookup)
+    return sum_df
+
+
+def add_ATM_options_to_sum_df(sum_df, od_hl, od_raw):
+    '''
+    Add options and their future value to sum_df
+    '''
+    sum_df = add_current_option_info(sum_df, od_hl)
+    sum_df = add_next_prices_to_sum(sum_df, od_raw)
+    return sum_df
+
+
+def add_put_and_call_sgy(df):
+    for put_call in ["put", "call"]:
+        for low_high in ["low", "high"]:
+            df[f"free_{low_high}_{put_call}"] = (
+                    df[f"{low_high}_{put_call}_1_price_next"] - (1 + df[f"RF"]) * df[f"{low_high}_{put_call}_price_1"]
+            ).shift(1)
+
+    # 30 day version
+    T1 = df["low days"].shift(1)
+    T2 = df["high days"].shift(1)
+    for put_call in ["put", "call"]:
+        df[f"30_{put_call}"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_low_{put_call}"],
+                                                      r2=df[f"free_high_{put_call}"])
+    return df
+
+
+def add_straddle_sgy(df):
+    for low_high in ["low", "high"]:
+        df[f"free_{low_high}_straddle"] = df[f"free_{low_high}_put"] + df[f"free_{low_high}_call"]
+
+    # 30 day version
+    T1 = df["low days"].shift(1)
+    T2 = df["high days"].shift(1)
+    df["30_straddle"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_low_straddle"], r2=df[f"free_high_straddle"])
+    return df
+
+
+def add_delta_put_and_call_sgy(df):
+    for put_call in ["put", "call"]:
+        for low_high in ["low", "high"]:
+            df[f"free_D_{low_high}_{put_call}"] = (
+                    df[f"{low_high}_{put_call}_1_price_next"] - (1 + df[f"RF"]) * df[f"{low_high}_{put_call}_price_1"] -
+                    df[f"{low_high}_{put_call}_delta_1"] * df[f"close"] * (df[f"return"].shift(-1) - df[f"RF"])
+            # Delta hedge (self financed)
+            ).shift(1)
+
+    # 30 day version
+    T1 = df["low days"].shift(1)
+    T2 = df["high days"].shift(1)
+    for put_call in ["put", "call"]:
+        df[f"30_D_{put_call}"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_D_low_{put_call}"],
+                                                        r2=df[f"free_D_high_{put_call}"])
+    return df
+
+
+def add_delta_straddle_sgy(df):
+    for low_high in ["low", "high"]:
+        df[f"free_D_{low_high}_straddle"] = df[f"free_D_{low_high}_put"] + df[f"free_D_{low_high}_call"]
+
+    # 30 day version
+    T1 = df["low days"].shift(1)
+    T2 = df["high days"].shift(1)
+    df["30_D_straddle"] = T_day_interpolation(T1=T1, T2=T2, r1=df[f"free_D_low_straddle"],
+                                                 r2=df[f"free_D_high_straddle"])
+    return df
+
+
+def add_self_financed_stock_sgy(df):
+    for ticker in df['ticker'].unique():
+        ticker_mask = df['ticker'] == ticker
+        df.loc[ticker_mask, 'ticker_change_free'] = (
+                df.loc[ticker_mask, 'close'] -
+                df.loc[ticker_mask, 'close'].shift(1) * (1 + df.loc[ticker_mask, 'RF'])
+        )
+    return df
