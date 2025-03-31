@@ -4,6 +4,7 @@ from scipy.stats import norm
 from datetime import datetime
 import sys
 import time
+from itertools import islice
 
 # from global_settings import days_type
 import importlib
@@ -230,76 +231,97 @@ def add_FW_to_od(od, FW):
 
 
 def calc_realized_var(returns_and_prices, first_day, last_day):
-    # Filter and explicitly copy the DataFrame
+    # Bestem T ud fra days_type()
+
+    if days_type() == "c_":
+        T = 30  # Kalenderdage
+    elif days_type() == "t_":
+        T = 21  # Trading days: brug altid de næste 21 observationer
+
+    # Filter data for perioden fra first_day til last_day + 30 dage (skal være bredt nok til at dække T observationer)
     last_day_ret = last_day + pd.Timedelta(days=30)
     returns_and_prices = returns_and_prices[
         (returns_and_prices['date'] >= first_day) & (returns_and_prices['date'] <= last_day_ret)
     ].copy()
 
-    # Compute squared daily returns
+    # Beregn squared daily returns
     returns_and_prices["squared_return"] = returns_and_prices["return"] ** 2
 
-    #logreturns
+    # Beregn log-returns (hvis nødvendigt)
     returns_and_prices['log_return'] = np.log(1 + returns_and_prices['return'])
     returns_and_prices['squared_log_return'] = returns_and_prices['log_return'] ** 2
-    
-    def sum_next_30_days(group):
+
+    # Definer en funktion til at summe over de næste T observationer (for trading days) eller T kalenderdage
+    def sum_next_T_days(group):
         group = group.sort_values(by='date')
         rv_list = []
         active_days_list = []
-        rv_om_list = []  # New list for RV_OM
+        
+        # if days_type() == "t_":
+        #     # Trading days: brug præcis de næste T observationer – hvis ikke nok, returnér eksisterende sum
+        #     for idx, row in group.iterrows():
+        #         # window = group.iloc[idx:(idx + min(T, len(group) - idx))]
+        #         window = group.iloc[idx:(idx + T)]
+        #         rv_sum = window['squared_return'].sum()
+        #         active_days = window.shape[0]
+        #         rv_list.append(rv_sum)
+        #         active_days_list.append(active_days)
 
-        for i, row in group.iterrows():
-            current_date = row['date']
-            end_date = current_date + pd.Timedelta(days=30)
-            mask = (group['date'] >= current_date) & (group['date'] < end_date)
-            window_data = group.loc[mask]
-            rv_sum = window_data['squared_return'].sum() #squared_log_return v squared_return
-            active_days = window_data.shape[0]
-            rv_list.append(rv_sum)
-            active_days_list.append(active_days)
+
+        if days_type() == "t_":
+            # Trading days: brug de næste T trading-dage baseret på dato – med mask ligesom i 'c_'
+            dates = group["date"].tolist()
             
-            # OM mehtod to calc RV
-            rv_om = window_data['log_return'].std() * np.sqrt(21) # * np.sqrt(252)  # Annualize for at matche OM DATA
-            rv_om_list.append(rv_om)
+            for _, row in group.iterrows():
+                current_date = row["date"]
+                # future_dates = [d for d in dates if d >= current_date][:T]
+                future_dates = list(islice((d for d in dates if d >= current_date), T))
+                mask = group["date"].isin(future_dates)
+                window = group.loc[mask]
+                rv_sum = window["squared_return"].sum()
+                active_days = window.shape[0]
+                rv_list.append(rv_sum)
+                active_days_list.append(active_days)
 
+
+        elif days_type() == "c_":
+            # Hvis det er kalenderdage, brug tidsbaseret slicing med pd.Timedelta(days=T)
+            for _, row in group.iterrows():
+                current_date = row['date']
+                end_date = current_date + pd.Timedelta(days=T)
+                mask = (group['date'] >= current_date) & (group['date'] < end_date)
+                window = group.loc[mask]
+                rv_sum = window['squared_return'].sum()
+                active_days = window.shape[0]
+                rv_list.append(rv_sum)
+                active_days_list.append(active_days)
+        
         result = pd.DataFrame({
             'RV_unscaled': rv_list,
-            'RV_OM': rv_om_list,
             'N_tradingdays': active_days_list
         }, index=group.index)
         return result
 
     result_df = (
         returns_and_prices.groupby('ticker')
-        .apply(sum_next_30_days)
+        .apply(sum_next_T_days)
         .reset_index(level=0, drop=True)
     )
 
-    # Use .loc to set the new columns
-    # returns_and_prices.loc[:, 'RV_unscaled'] = result_df['RV_unscaled']
+    # Annualiser RV_unscaled: divider med antallet af dage (observationer) i vinduet og gang med 252
     returns_and_prices.loc[:, 'RV'] = result_df['RV_unscaled'] * (252 / result_df['N_tradingdays'])
-    returns_and_prices.loc[:, 'RV_OM'] = result_df['RV_OM'] 
     returns_and_prices.loc[:, 'N_tradingdays'] = result_df['N_tradingdays']
 
-    # Filter again and explicitly copy the DataFrame
+    # Filtrer igen for perioden first_day til last_day
     returns_and_prices = returns_and_prices[
         (returns_and_prices['date'] >= first_day) & (returns_and_prices['date'] <= last_day)
     ].copy()
 
-    # returns_and_prices = returns_and_prices[
-    #     ~((returns_and_prices['ticker'] == 'DJX') & (returns_and_prices['date'] < pd.to_datetime("1997-10-06")))
-    # ].copy()
-    #
-    # returns_and_prices = returns_and_prices[
-    #     ~((returns_and_prices['ticker'] == 'AMZN') & (returns_and_prices['date'] < pd.to_datetime("1997-11-19")))
-    # ].copy()
-
-    # returns_and_prices["RV"] = returns_and_prices["RV_scaled"]
-    # returns_and_prices.drop(['RV_scaled'], axis=1) # todo: make this always RV instead of new column and then rename and remove scaled
+    # Fjern midlertidige kolonner
     returns_and_prices.drop(['log_return', 'squared_log_return'], axis=1, inplace=True)
 
     return returns_and_prices
+
 
 
 
@@ -832,7 +854,7 @@ def add_realized_vol_to_summary(summary_dly_df, real_vol):
 
     # Merge by specifying left_on and right_on keys
     merged_df = summary_dly_df_reset.merge(
-        real_vol[['date', 'ticker', 'RV', 'open', 'close', 'squared_return', 'return']],
+        real_vol[['date', 'ticker', 'RV', 'N_tradingdays', 'open', 'close', 'squared_return', 'return']],
         left_on=['date', 'ticker'],
         right_on=['date', 'ticker'],
         how='left'
