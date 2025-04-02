@@ -46,6 +46,7 @@ def add_put_and_call_sgy(df, OTMs, HL30_list = ["low", "high", "30"]):
     ATM_str = "ATM"
     OTM_str = [f"OTM_{round(OTM * 100)}%" for OTM in OTMs]
     moneynesses = [ATM_str] + OTM_str
+    new_columns = {} # Dictionary to collect new columns
 
     for put_call in ["put", "call"]:
         for D_str in ["D_", ""]:
@@ -57,13 +58,16 @@ def add_put_and_call_sgy(df, OTMs, HL30_list = ["low", "high", "30"]):
                     CF = Calculate_CashFlow(df, current_price, next_price)
                     ret = Calculate_return(df, current_price, next_price)
 
-                    df[f"CF_{D_str}{low_high}_{put_call}_{moneyness}"] = CF
-                    df[f"r_{D_str}{low_high}_{put_call}_{moneyness}"] = ret
+                    new_columns[f"CF_{D_str}{low_high}_{put_call}_{moneyness}"] = CF
+                    new_columns[f"r_{D_str}{low_high}_{put_call}_{moneyness}"] = ret
+    new_cols_df = pd.DataFrame(new_columns, index=df.index)
+    df = pd.concat([df, new_cols_df], axis=1)
     return df
 
 def add_straddle_strangle_sgy(df, OTMs, HL30_list = ["low", "high", "30"]):
     ATM_str = "ATM"
     OTM_str = [f"OTM_{round(OTM * 100)}%" for OTM in OTMs]
+    new_columns = {} # Dictionary to collect new columns
 
     moneynesses = [ATM_str] + OTM_str
     sgy_names = ["straddle"] + [f"strangle_{round(OTM * 100)}%" for OTM in OTMs]
@@ -82,14 +86,17 @@ def add_straddle_strangle_sgy(df, OTMs, HL30_list = ["low", "high", "30"]):
                 CF = Calculate_CashFlow(df, current_price, next_price)
                 ret = Calculate_return(df, current_price, next_price)
 
-                df[f"CF_{D_str}{low_high}_{sgy_name}"] = CF
-                df[f"r_{D_str}{low_high}_{sgy_name}"] = ret
+                new_columns[f"CF_{D_str}{low_high}_{sgy_name}"] = CF
+                new_columns[f"r_{D_str}{low_high}_{sgy_name}"] = ret
+    new_cols_df = pd.DataFrame(new_columns, index=df.index)
+    df = pd.concat([df, new_cols_df], axis=1)
     return df
 
 def add_butterfly_spread_sgy(df, OTMs, HL30_list = ["low", "high", "30"]):
     ATM_str = "ATM"
     OTM_strs = [f"OTM_{round(OTM * 100)}%" for OTM in OTMs]
     sgy_names = [f"butterfly_spread_{round(OTM * 100)}%" for OTM in OTMs]
+    new_columns = {} # Dictionary to collect new columns
 
     # Function to calculate the portfolio price for a given scenario
     def calculate_price(low_high, D_str, OTM_str, next_str):
@@ -106,13 +113,17 @@ def add_butterfly_spread_sgy(df, OTMs, HL30_list = ["low", "high", "30"]):
                 CF = Calculate_CashFlow(df, current_price, next_price)
                 ret = Calculate_return(df, current_price, next_price)
 
-                df[f"CF_{D_str}{low_high}_{sgy_name}"] = CF
-                df[f"r_{D_str}{low_high}_{sgy_name}"] = ret
+                new_columns[f"CF_{D_str}{low_high}_{sgy_name}"] = CF
+                new_columns[f"r_{D_str}{low_high}_{sgy_name}"] = ret
+
+    new_cols_df = pd.DataFrame(new_columns, index=df.index)
+    df = pd.concat([df, new_cols_df], axis=1)
     return df
 
 
 def add_condor_strangle_sgy(df, OTMs, HL30_list = ["low", "high", "30"]):
     sgy_name_base = f"condor_strangle"
+    new_columns = {} # Dictionary to collect new columns
 
     # Function to calculate the portfolio price for a given scenario
     def calculate_price(low_high, D_str, less_OTM, more_OTM, next_str):
@@ -136,9 +147,15 @@ def add_condor_strangle_sgy(df, OTMs, HL30_list = ["low", "high", "30"]):
                     CF = Calculate_CashFlow(df, current_price, next_price)
                     ret = Calculate_return(df, current_price, next_price)
 
-                    df[f"CF_{D_str}{low_high}_{sgy_name}"] = CF
-                    df[f"r_{D_str}{low_high}_{sgy_name}"] = ret
+                    new_columns[f"CF_{D_str}{low_high}_{sgy_name}"] = CF
+                    new_columns[f"r_{D_str}{low_high}_{sgy_name}"] = ret
+
+
+
+    new_cols_df = pd.DataFrame(new_columns, index=df.index)
+    df = pd.concat([df, new_cols_df], axis=1)
     return df
+
 
 def add_stock_sgy(df, _ = None, __ = None):
     for ticker in df['ticker'].unique():
