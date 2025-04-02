@@ -487,76 +487,6 @@ def add_bid_mid_ask_IV(od, IV_type):
     IV = vectorized_iv(F, K, T, market_price, cp_flag)
     return IV
 
-# def process_group_activity_summary(group):
-
-#     days_var = days_type() + "days"
-
-#     if days_type() == "t_" and clean_t_days():
-#         x = 1
-#     else:
-#         x = 0
-
-#     # Extract the current date and ticker from the group
-#     current_date = group["date"].iloc[0]
-#     current_ticker = group["ticker"].iloc[0]
-#     summary = {}
-
-#     # Initialize the new columns to False
-#     group["low"] = False
-#     group["high"] = False
-
-#     # Get sorted unique days for this (date, ticker) pair
-#     unique_days = np.sort(group[days_var].unique())
-#     summary["#days"] = len(unique_days)
-
-#     # Inactive if there are fewer than 2 unique days
-#     if len(unique_days) < 2:
-#         summary["Active"] = False
-#         summary["Inactive reason"] = "unique(_days) < 2"
-#         return group, summary
-
-#     # Inactive if the minimum day is > 90
-#     if unique_days[0] > 90 - x*90*0.3: #todo: change to above something like x_TTM > 0.25
-#         summary["Active"] = False
-#         summary["Inactive reason"] = "min days > 90"
-#         return group, summary
-
-#     # Select two lowest days above 7 days.
-#     # If the smallest day is <= 8 and at least 3 unique days exist, skip it.
-#     low_2_days = list(unique_days[:2])
-#     if low_2_days[0] <= 8 - x*2: #todo: change to above something like <= 6 || <= 8 depending on 'days_type'
-#         if len(unique_days) < 3:
-#             summary["Active"] = False
-#             summary["Inactive reason"] = "min days <= 8 & len < 3"
-#             return group, summary
-#         low_2_days = list(unique_days[1:3])
-
-#     summary["low days"] = low_2_days[0]
-#     summary["high days"] = low_2_days[1]
-
-#     # Check unique strike counts for each selected day; require at least 3
-#     active = True
-#     for day, label in zip(low_2_days, ["low", "high"]):
-#         num_strikes = group.loc[group[days_var] == day, "K"].nunique()
-#         summary[f"{label} #K"] = num_strikes
-#         if num_strikes < 3:
-#             active = False
-#             summary["Active"] = False
-#             summary["Inactive reason"] = "unique(K) < 3"
-#     summary[f"#K"] = (summary[f"low #K"] + summary[f"high #K"]) / 2
-#     if not active:
-#         return group, summary
-
-#     summary["Active"] = True
-#     summary["Inactive reason"] = ""
-
-#     # Set the 'low' and 'high' flags for the corresponding rows
-#     group.loc[group[days_var] == low_2_days[0], "low"] = True
-#     group.loc[group[days_var] == low_2_days[1], "high"] = True
-
-#     return group, summary
-
-
 
 def process_group_activity_summary(group):
     days_var = days_type() + "days"  # fx "t_days" eller "c_days"
@@ -731,39 +661,6 @@ def interpolated_ZCY(ZCY_date, target_days, date = None, filter_date = True):
     else:
         return y0 + (y1 - y0) * (target_days - x0) / (x1 - x0)
 
-
-# # likely irrelevant now.
-# def interpolated_FW(FW_date, target_days, date = None, ticker=None, filter_date = True):
-#     # # Filter the DataFrame for the given date
-#     # FW_date = FW_curves
-#     # if filter_date == False:
-#     #     FW_date = FW_curves[(FW_curves['date'] == date)]
-#     # if ticker != None:
-#     #     FW_date = FW_date[(FW_date['ticker'] == ticker)]
-#     # if FW_date.empty:
-#     #     raise ValueError(f"No data available for the date {date}")
-#     #
-#     # # Sort the DataFrame by days to find the nearest points
-#     # # FW_date = FW_date.sort_values(by='days')
-#
-#     # Find the two nearest points
-#     lower = FW_date[FW_date['days'] <= target_days].tail(1)
-#     upper = FW_date[FW_date['days'] >= target_days].head(1)
-#
-#     if lower.empty or upper.empty:
-#         raise ValueError(f"Not enough data points to interpolate for {target_days} days")
-#
-#     # Extract the days and forward prices for interpolation
-#     x0, y0 = lower['days'].values[0], lower['forwardprice'].values[0]
-#     x1, y1 = upper['days'].values[0], upper['forwardprice'].values[0]
-#
-#     # Perform linear interpolation
-#     if x0 == x1:
-#         return y0
-#     else:
-#         return y0 + (y1 - y0) * (target_days - x0) / (x1 - x0)
-
-
 from tqdm import tqdm
 
 
@@ -834,16 +731,15 @@ def interpolate_swaps_and_returns(summary_dly_df):
     summary_dly_df["SW_0_29"] = SW1 * (1-theta) + SW2 * theta
     # summary_dly_df["SW_1_30"] = summary_dly_df.groupby("ticker")["SW_0_29"].shift(-1)
 
-    buy_price = summary_dly_df["SW_m1_29"]
-    sell_price = (1/T) * 252 * summary_dly_df["squared_return"] + (T-1)/T * summary_dly_df["SW_0_29"] #todo: change 252 for the actual true average trading days a year
-    summary_dly_df["CF_30_SW_day"] = sell_price - buy_price
+    summary_dly_df["SW_sell"] = (1/T) * 252 * summary_dly_df["squared_return"] + (T-1)/T * summary_dly_df["SW_0_29"] #todo: change 252 for the actual true average trading days a year
+    summary_dly_df["SW_buy"] = summary_dly_df["SW_m1_29"]
+
+    summary_dly_df["CF_30_SW_day"] = summary_dly_df["SW_sell"] - summary_dly_df["SW_buy"]
     summary_dly_df["r_30_SW_day"] = summary_dly_df["CF_30_SW_day"] / summary_dly_df["SW_buy"].shift(1).rolling(window=21).mean()
 
     # summary_dly_df['SW_day_RF'] = sell_price - (1 + RF) * buy_price
     # summary_dly_df['SW_day_ln_ret'] = np.log(np.maximum(sell_price, 0.001) / np.maximum(buy_price, 0.001))
     # summary_dly_df["SW_day_ln_ret_RF"] = np.log(np.maximum(sell_price, 0.001) / np.maximum((1 + RF) * buy_price, 0.001))
-    summary_dly_df["SW_sell"] = sell_price
-    summary_dly_df["SW_buy"] = buy_price
     # summary_dly_df["SW_return_day_scaled"] = summary_dly_df["SW_return_day"] / summary_dly_df["SW_m1_29"]
 
     return summary_dly_df
