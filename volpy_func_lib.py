@@ -836,7 +836,8 @@ def interpolate_swaps_and_returns(summary_dly_df):
 
     buy_price = summary_dly_df["SW_m1_29"]
     sell_price = (1/T) * 252 * summary_dly_df["squared_return"] + (T-1)/T * summary_dly_df["SW_0_29"] #todo: change 252 for the actual true average trading days a year
-    summary_dly_df["SW_day"] = sell_price - buy_price
+    summary_dly_df["CF_30_SW_day"] = sell_price - buy_price
+    summary_dly_df["r_30_SW_day"] = summary_dly_df["CF_30_SW_day"] / summary_dly_df["SW_buy"].shift(1).rolling(window=21).mean()
 
     # summary_dly_df['SW_day_RF'] = sell_price - (1 + RF) * buy_price
     # summary_dly_df['SW_day_ln_ret'] = np.log(np.maximum(sell_price, 0.001) / np.maximum(buy_price, 0.001))
