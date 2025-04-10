@@ -15,6 +15,37 @@ def Calculate_return(df, current_price, next_price):
     # ret = Calculate_CashFlow(df, current_price, next_price) / current_price.shift(-1)
     return ret
 
+
+def prepare_stock(df, curr_OTMs):
+    df = add_stock_sgy(df)
+    df = add_stock_adj_close(df)
+    df = D_PC_option_prices(df, curr_OTMs)
+    return df
+
+def add_stock_adj_close(df):
+    def compute_adj_close(group):
+        group = group.sort_values("date")
+        # Get the first non-NaN closing price.
+        first_valid_close_idx = group["close"].first_valid_index()
+        if first_valid_close_idx is None:
+            return pd.Series(np.nan, index=group.index)
+        start = group.loc[first_valid_close_idx, "close"]
+
+        # Copy returns and set the first non-NaN return to 0.
+        r = group["return"].copy()
+        first_valid_return_idx = r.first_valid_index()
+        if first_valid_return_idx is not None:
+            r.loc[first_valid_return_idx] = 0
+
+        # Compute the cumulative product on the modified returns.
+        factor = (1 + r).cumprod()
+
+        return start * factor
+
+    # Apply to each ticker
+    df["adj_close"] = df.groupby("ticker").apply(lambda g: compute_adj_close(g)).reset_index(level=0, drop=True)
+    return df
+
 def D_PC_option_prices(df, OTMs):
     ATM_str = "ATM"
     OTM_str = [f"OTM_{round(OTM * 100)}%" for OTM in OTMs]
@@ -32,7 +63,7 @@ def D_PC_option_prices(df, OTMs):
 
                 df[f"D_{low_high}_{put_call}_{moneyness}_price_next"] = (
                     df[f"{low_high}_{put_call}_{moneyness}_price_next"] -
-                    df[f"{low_high}_{put_call}_{moneyness}_delta"] * df[f"close"] * (df["return"]-df["RF"]).shift(-1)
+                    df[f"{low_high}_{put_call}_{moneyness}_delta"] * df[f"adj_close"] * df["r_stock"].shift(-1)
                 )
 
             for time in ["", "_next"]:
@@ -41,6 +72,21 @@ def D_PC_option_prices(df, OTMs):
                     high_price_time = df[f"{D_str}high_{put_call}_{moneyness}_price{time}"]
                     df[f"{D_str}30_{put_call}_{moneyness}_price{time}"] = T_day_interpolation(T1=T1, T2=T2, r1=low_price_time, r2=high_price_time)
     return df
+
+def add_stock_sgy(df):
+    df["r_stock"] = df["return"] - df["RF"]
+    return df
+
+    # # identical to this, however works when stocksplits
+    # for ticker in df['ticker'].unique():
+    #     ticker_mask = df['ticker'] == ticker
+    #     next_price = df.loc[ticker_mask, 'adj_close'].shift(-1)
+    #     current_price = df.loc[ticker_mask, 'adj_close']
+    #
+    #     df.loc[ticker_mask, f'CF_stock'] = Calculate_CashFlow(df, current_price, next_price)
+    #     df.loc[ticker_mask, f'r_stock'] = Calculate_return(df, current_price, next_price)
+    #     return df
+
 
 def add_put_and_call_sgy(df, OTMs, HL30_list = ["low", "high", "30"]):
     ATM_str = "ATM"
@@ -155,19 +201,6 @@ def add_condor_strangle_sgy(df, OTMs, HL30_list = ["low", "high", "30"]):
     new_cols_df = pd.DataFrame(new_columns, index=df.index)
     df = pd.concat([df, new_cols_df], axis=1)
     return df
-
-
-def add_stock_sgy(df, _ = None, __ = None):
-    for ticker in df['ticker'].unique():
-        ticker_mask = df['ticker'] == ticker
-        next_price = df.loc[ticker_mask, 'close'].shift(-1)
-        current_price = df.loc[ticker_mask, 'close']
-
-        df.loc[ticker_mask, f'CF_stock'] = Calculate_CashFlow(df, current_price, next_price)
-        df.loc[ticker_mask, f'r_stock'] = Calculate_return(df, current_price, next_price)
-    return df
-
-
 
 
 

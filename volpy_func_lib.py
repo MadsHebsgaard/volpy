@@ -961,3 +961,164 @@ def plot_diff_akk(df, tickers, from_date=None, to_date=None, logreturn=False):
     plt.tight_layout()  # Ensure everything fits in the plot
     plt.show()
 
+
+
+
+def create_sgy_list(sgy_common = "CF_D_30_", sgy_list = ["straddle", "strangle_15%", "call_ATM", "put_ATM"]):
+    return [sgy_common + sgy for sgy in sgy_list] + ["CF_30_SW_day", "r_30_SW_day"]
+
+
+def return_df(df_big, sgy_list = create_sgy_list(), ticker_list = ["SPX"]):
+    df = df_big[df_big["ticker"].isin(ticker_list)]
+
+    df = df[df["CF_D_30_put_ATM"].isna() == False]
+    df = df[df["CF_D_30_call_ATM"].isna() == False]
+
+    col_list = ["date", "RF", "r_stock"] + sgy_list
+    df = df[col_list]
+    return df
+
+
+def scale_columns_to_r_stock_std_dev(df, sgy_list, ref_column="r_stock"):
+    """
+    Scale the columns in sgy_list within the dataframe df so that each has the same volatility
+    (standard deviation) as the reference column, default 'r_stock'.
+
+    Parameters:
+    - df: pandas.DataFrame containing the data.
+    - sgy_list: list of column names in df to be scaled.
+    - ref_column: the name of the reference column to match volatility (default is 'r_stock').
+
+    Returns:
+    - df: The dataframe with scaled columns.
+    """
+    # Ensure the reference column exists.
+    if ref_column not in df.columns:
+        raise ValueError(f"Reference column '{ref_column}' not found in DataFrame.")
+
+    # Calculate the standard deviation (volatility) of the reference column.
+    ref_vol = df[ref_column].std()
+
+    # Loop through each column in sgy_list and scale it.
+    for col in sgy_list:
+        if col not in df.columns:
+            print(f"Column '{col}' not found in DataFrame, skipping.")
+            continue
+
+        # Calculate the current volatility of the column.
+        col_vol = df[col].std()
+        if col_vol == 0:
+            print(f"Column '{col}' has zero volatility, skipping scaling.")
+            continue
+
+        # Calculate the scaling factor and apply the scaling.
+        scale_factor = ref_vol / col_vol
+        df[col] = df[col] * scale_factor
+
+    return df
+
+def scale_columns_to_r_stock_average(df, sgy_list, ref_column="r_stock"):
+    """
+    Scale the columns in sgy_list within the dataframe df so that each has the same average
+    (mean) as the reference column, default 'r_stock'.
+
+    Parameters:
+    - df: pandas.DataFrame containing the data.
+    - sgy_list: list of column names in df to be scaled.
+    - ref_column: the name of the reference column to match the average (default is 'r_stock').
+
+    Returns:
+    - df: The DataFrame with scaled columns.
+    """
+    # Ensure the reference column exists.
+    if ref_column not in df.columns:
+        raise ValueError(f"Reference column '{ref_column}' not found in DataFrame.")
+
+    # Compute the mean of the reference column.
+    ref_mean = df[ref_column].mean()
+
+    # Loop through each column in sgy_list and scale it.
+    for col in sgy_list:
+        if col not in df.columns:
+            print(f"Column '{col}' not found in DataFrame, skipping.")
+            continue
+
+        # Calculate the current mean of the column.
+        col_mean = df[col].mean()
+        if col_mean == 0:
+            print(f"Column '{col}' has a zero mean, skipping scaling to avoid division by zero.")
+            continue
+
+        # Compute scaling factor so that the new average becomes ref_mean.
+        scale_factor = ref_mean / col_mean
+        df[col] = df[col] * scale_factor
+
+    return df
+
+
+def plot_returns(df, sgy_common, sgy_names):
+    plt.figure(figsize=(30, 10))
+
+    for sgy_name in sgy_names:
+        sgy_str = sgy_common + sgy_name
+        plt.plot(df["date"], np.cumsum(df[f"{sgy_str}"]), label=rf"{sgy_name}", alpha=0.8)
+
+    plt.plot(df["date"], np.cumsum(df["r_stock"]),
+        label="Stock", alpha=0.4)
+
+    x_SW_dly = df["CF_30_SW_day"]
+    plt.plot(df["date"], np.cumsum(x_SW_dly), label = "Swap day")
+
+    x_SW_dly = df["r_30_SW_day"]
+    plt.plot(df["date"], np.cumsum(x_SW_dly), label = "Swap day return")
+
+    plt.grid()
+    plt.legend()
+    plt.show()
+
+
+def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strangle_15%", "call_ATM", "put_ATM"], factor_df_columns=['Mkt', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF'], sign=True, scale=True, plot = False):
+    sgy_list = create_sgy_list(sgy_common, sgy_names)
+    df = return_df(df, sgy_list = sgy_list, ticker_list = ["SPX"])
+    if sign:
+        df = scale_columns_to_r_stock_average(df, sgy_list, ref_column="r_stock")
+    if scale:
+        df = scale_columns_to_r_stock_std_dev(df, sgy_list, ref_column="r_stock")
+
+    df = add_factor_df_columns(df, factor_df_columns)
+
+    if plot:
+        plot_returns(df, sgy_common, sgy_names)
+
+    return df
+
+
+def add_factor_df_columns(df, factor_df_columns=['Mkt', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF']):
+    factor_df = pd.read_csv("data/factor_df.csv")
+    factor_df['date'] = pd.to_datetime(factor_df['date'], format='%Y-%m-%d')
+    factor_df_columns = ['Mkt', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF']
+
+    factor_df = factor_df[["date"] + factor_df_columns]
+    return_df = df.merge(factor_df, on='date', how='left')
+    return return_df
+
+
+def lm_regress(df, y_column, x_columns, print_summary=True):
+    df = df[df[y_column].isna() == False]
+    import statsmodels.api as sm
+
+    # Define your target variable and factor variables
+    X = df[x_columns]  # Independent variables
+    y = df[y_column]  # Dependent variable
+
+    # Add a constant term to the independent variables for the intercept
+    X = sm.add_constant(X)
+
+    # Fit the linear regression model
+    model = sm.OLS(y, X).fit()
+
+    if print_summary:
+        # Print the summary statistics
+        print(model.summary())
+
+    return model.summary()
