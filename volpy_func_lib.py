@@ -974,7 +974,7 @@ def return_df(df_big, sgy_list = create_sgy_list(), ticker_list = ["SPX"]):
     df = df[df["CF_D_30_put_ATM"].isna() == False]
     df = df[df["CF_D_30_call_ATM"].isna() == False]
 
-    col_list = ["date", "RF", "r_stock"] + sgy_list
+    col_list = ["date", "r_stock"] + sgy_list
     df = df[col_list]
     return df
 
@@ -1056,7 +1056,7 @@ def scale_columns_to_r_stock_average(df, sgy_list, ref_column="r_stock"):
     return df
 
 
-def plot_returns(df, sgy_common, sgy_names):
+def plot_returns(df, sgy_common, sgy_names, factors):
     plt.figure(figsize=(30, 10))
 
     for sgy_name in sgy_names:
@@ -1065,6 +1065,9 @@ def plot_returns(df, sgy_common, sgy_names):
 
     plt.plot(df["date"], np.cumsum(df["r_stock"]),
         label="Stock", alpha=0.4)
+
+    for factor in factors:
+        plt.plot(df["date"], np.cumsum(df[f"{factor}"]), label=rf"{factor}", alpha=0.8)
 
     x_SW_dly = df["CF_30_SW_day"]
     plt.plot(df["date"], np.cumsum(x_SW_dly), label = "Swap day")
@@ -1077,18 +1080,20 @@ def plot_returns(df, sgy_common, sgy_names):
     plt.show()
 
 
-def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strangle_15%", "call_ATM", "put_ATM"], factor_df_columns=['Mkt', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF'], sign=True, scale=True, plot = False):
+def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strangle_15%", "call_ATM", "put_ATM"], factors=['Mkt', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF'], sign=True, scale=True, plot = False, ticker_list = ["SPX"]):
     sgy_list = create_sgy_list(sgy_common, sgy_names)
-    df = return_df(df, sgy_list = sgy_list, ticker_list = ["SPX"])
-    if sign:
-        df = scale_columns_to_r_stock_average(df, sgy_list, ref_column="r_stock")
-    if scale:
-        df = scale_columns_to_r_stock_std_dev(df, sgy_list, ref_column="r_stock")
+    df = return_df(df, sgy_list = sgy_list, ticker_list = ticker_list)
 
-    df = add_factor_df_columns(df, factor_df_columns)
+    df = add_factor_df_columns(df, factors)
+
+    if sign:
+        df = scale_columns_to_r_stock_average(df, sgy_list + factors, ref_column="r_stock")
+    if scale:
+        df = scale_columns_to_r_stock_std_dev(df, sgy_list + factors, ref_column="r_stock")
 
     if plot:
-        plot_returns(df, sgy_common, sgy_names)
+        factors = [col for col in factors if col != "RF"]
+        plot_returns(df, sgy_common, sgy_names, factors)
 
     return df
 
@@ -1096,7 +1101,6 @@ def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strang
 def add_factor_df_columns(df, factor_df_columns=['Mkt', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF']):
     factor_df = pd.read_csv("data/factor_df.csv")
     factor_df['date'] = pd.to_datetime(factor_df['date'], format='%Y-%m-%d')
-    factor_df_columns = ['Mkt', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF']
 
     factor_df = factor_df[["date"] + factor_df_columns]
     return_df = df.merge(factor_df, on='date', how='left')
@@ -1122,3 +1126,296 @@ def lm_regress(df, y_column, x_columns, print_summary=True):
         print(model.summary())
 
     return model.summary()
+
+
+
+from scipy.stats import skew, kurtosis
+
+
+def compute_performance_measures_cashflows(df, cvar_alpha=0.05):
+    df = df.drop(columns=["date", "RF"], errors="ignore")
+    df = df.apply(pd.to_numeric, errors='coerce')
+
+    results = {}
+
+    for col in df.columns:
+        data = df[col].dropna()
+
+        mean = data.mean()
+        std = data.std()
+        downside_std = data[data < 0].std()
+        sharpe = mean / std if std != 0 else np.nan
+        sortino = mean / downside_std if downside_std != 0 else np.nan
+
+        # PnL path and max drawdown
+        pnl_path = data.cumsum()
+        peak = pnl_path.cummax()
+        drawdown = pnl_path - peak
+        max_drawdown = drawdown.min()
+
+        # Risk metrics
+        var = np.quantile(data, cvar_alpha)
+        cvar = data[data <= var].mean()
+
+        results[col] = {
+            "Mean": mean,
+            "Std Dev": std,
+            "Sharpe Ratio": sharpe,
+            "Sortino Ratio": sortino,
+            "Skew": skew(data),
+            "Kurtosis": kurtosis(data),
+            "Max Drawdown (CumCF)": max_drawdown,
+            f"VaR {int(cvar_alpha * 100)}%": var,
+            f"CVaR {int(cvar_alpha * 100)}%": cvar,
+            "Total Cashflow": pnl_path.iloc[-1]
+        }
+
+    return pd.DataFrame(results).T
+
+
+def compute_extensive_performance_measures_cashflows(df, cvar_alpha=0.05, periods_per_year=252):
+    # Drop unnecessary columns and convert to numeric values
+    df = df.drop(columns=["date", "RF"], errors="ignore")
+    df = df.apply(pd.to_numeric, errors='coerce')
+
+    results = {}
+
+    for col in df.columns:
+        data = df[col].dropna()
+
+        # Compute daily basic statistics
+        mean = data.mean()
+        std = data.std()
+        downside_std = data[data < 0].std()
+
+        # Annualized metrics
+        annualized_mean = mean * periods_per_year
+        annualized_std = std * (periods_per_year ** 0.5)
+        annualized_sharpe = annualized_mean / annualized_std if annualized_std != 0 else np.nan
+        # Annualized Sortino: scale daily ratio by sqrt(periods_per_year)
+        annualized_sortino = (mean / downside_std * (periods_per_year ** 0.5)) if downside_std != 0 else np.nan
+
+        # Cumulative cashflow path and drawdown
+        pnl_path = data.cumsum()
+        peak = pnl_path.cummax()
+        drawdown = pnl_path - peak
+        max_drawdown = drawdown.min()
+
+        # Risk metrics: compute daily VaR and CVaR then annualize via sqrt(time) scaling
+        var = np.quantile(data, cvar_alpha)
+        cvar = data[data <= var].mean()
+        annualized_var = var * (periods_per_year ** 0.5)
+        annualized_cvar = cvar * (periods_per_year ** 0.5)
+
+        total_cashflow = pnl_path.iloc[-1]
+
+        # Win/loss statistics (not annualized)
+        pos = data[data > 0]
+        neg = data[data < 0]
+        win_rate = len(pos) / len(data) if len(data) > 0 else np.nan
+        avg_gain = pos.mean() if not pos.empty else np.nan
+        avg_loss = neg.mean() if not neg.empty else np.nan
+        gain_loss_ratio = (avg_gain / abs(avg_loss)) if (avg_loss != 0 and not np.isnan(avg_loss)) else np.nan
+        profit_factor = pos.sum() / abs(neg.sum()) if neg.sum() != 0 else np.nan
+
+        # Calmar Ratio: Annualized mean return divided by the absolute max drawdown
+        calmar_ratio = annualized_mean / abs(max_drawdown) if max_drawdown != 0 else np.nan
+
+        # Tail Ratio: Invariant to scaling, so calculated directly on daily returns
+        q90 = data.quantile(0.9)
+        q10 = data.quantile(0.1)
+        tail_ratio = q90 / abs(q10) if q10 != 0 else np.nan
+
+        # Recovery Duration: Measure from the maximum drawdown point (trough) to the recovery point
+        # Identify the index of maximum drawdown (trough)
+        max_dd_idx = np.argmin(drawdown)
+
+        # Recovery target is the peak value at the time of max drawdown
+        recovery_target = peak.iloc[max_dd_idx]
+
+        # Initialize recovery period calculation
+        recovery_periods = None
+
+        # Loop from max drawdown index onward to see when recovery is achieved
+        for j in range(max_dd_idx, len(pnl_path)):
+            if pnl_path.iloc[j] >= recovery_target:
+                recovery_periods = j - max_dd_idx
+                break
+
+        if recovery_periods is None:
+            # Recovery never occurred in the observed data.
+            # Calculate elapsed periods since max drawdown.
+            elapsed_periods = len(pnl_path) - max_dd_idx
+            # Calculate the gap between the target and the last pnl value.
+            current_gap = recovery_target - pnl_path.iloc[-1]
+            # Use the mean return (assumed positive) to estimate extra periods for recovery.
+            mean_return = data.mean()
+            if mean_return > 0:
+                additional_periods = current_gap / mean_return
+            else:
+                additional_periods = np.nan  # Alternatively, you could use a default value or float('inf')
+            recovery_periods = elapsed_periods + additional_periods
+
+        # Convert recovery time to years
+        recovery_duration_years = recovery_periods / periods_per_year
+
+
+        # Lag-1 Autocorrelation (daily data)
+        autocorr = data.autocorr(lag=1)
+
+        results[col] = {
+            "Ann. Mean": annualized_mean,
+            "Ann. Std Dev": annualized_std,
+            "Ann. Sharpe Ratio": annualized_sharpe,
+            "Ann. Sortino Ratio": annualized_sortino,
+            "Skew": skew(data),
+            "Kurtosis": kurtosis(data),
+            "Max Drawdown (CumCF)": max_drawdown,
+            f"Ann. VaR {int(cvar_alpha * 100)}%": annualized_var,
+            f"Ann. CVaR {int(cvar_alpha * 100)}%": annualized_cvar,
+            "Total Cashflow": total_cashflow,
+            "Win Rate": win_rate,
+            "Average Gain": avg_gain,
+            "Average Loss": avg_loss,
+            "Gain/Loss Ratio": gain_loss_ratio,
+            "Profit Factor": profit_factor,
+            "Calmar Ratio": calmar_ratio,
+            "Tail Ratio": tail_ratio,
+            "Recovery Duration (years)": recovery_duration_years,
+            "Lag-1 Autocorrelation": autocorr
+        }
+
+    return pd.DataFrame(results).T
+
+
+def compute_extensive_performance_measures_cashflows_FF_factors(df, cvar_alpha=0.05, periods_per_year=252):
+    from scipy.stats import skew, kurtosis
+    import statsmodels.api as sm
+
+    # Define all factor names (assumed to be present in the DataFrame)
+    factor_names = ['Mkt', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ']
+    # FF3 regression will use only these three factors:
+    ff3_factors = ['Mkt', 'SMB', 'HML']
+
+    # Identify asset return columns (exclude factor columns and date/risk-free)
+    asset_cols = [col for col in df.columns if col not in factor_names + ["date", "RF"]]
+
+    results = {}
+
+    for col in asset_cols:
+        data = df[col].dropna()
+
+        # Compute daily basic statistics
+        mean = data.mean()
+        std = data.std()
+        downside_std = data[data < 0].std()
+
+        # Annualized metrics
+        annualized_mean = mean * periods_per_year
+        annualized_std = std * (periods_per_year ** 0.5)
+        annualized_sharpe = annualized_mean / annualized_std if annualized_std != 0 else np.nan
+        annualized_sortino = (mean / downside_std * (periods_per_year ** 0.5)) if downside_std != 0 else np.nan
+
+        # Cumulative cashflow path and drawdown
+        pnl_path = data.cumsum()
+        peak = pnl_path.cummax()
+        drawdown = pnl_path - peak
+        max_drawdown = drawdown.min()
+
+        # Risk metrics: compute daily VaR and CVaR then annualize via sqrt(time) scaling
+        var = np.quantile(data, cvar_alpha)
+        cvar = data[data <= var].mean()
+        annualized_var = var * (periods_per_year ** 0.5)
+        annualized_cvar = cvar * (periods_per_year ** 0.5)
+
+        total_cashflow = pnl_path.iloc[-1]
+
+        # Win/loss statistics
+        pos = data[data > 0]
+        neg = data[data < 0]
+        win_rate = len(pos) / len(data) if len(data) > 0 else np.nan
+        avg_gain = pos.mean() if not pos.empty else np.nan
+        avg_loss = neg.mean() if not neg.empty else np.nan
+        gain_loss_ratio = (avg_gain / abs(avg_loss)) if (avg_loss != 0 and not np.isnan(avg_loss)) else np.nan
+        profit_factor = pos.sum() / abs(neg.sum()) if neg.sum() != 0 else np.nan
+
+        # Calmar Ratio
+        calmar_ratio = annualized_mean / abs(max_drawdown) if max_drawdown != 0 else np.nan
+
+        # Tail Ratio
+        q90 = data.quantile(0.9)
+        q10 = data.quantile(0.1)
+        tail_ratio = q90 / abs(q10) if q10 != 0 else np.nan
+
+        # Recovery Duration Calculation
+        max_dd_idx = np.argmin(drawdown)
+        recovery_target = peak.iloc[max_dd_idx]
+        recovery_periods = None
+        for j in range(max_dd_idx, len(pnl_path)):
+            if pnl_path.iloc[j] >= recovery_target:
+                recovery_periods = j - max_dd_idx
+                break
+        if recovery_periods is None:
+            elapsed_periods = len(pnl_path) - max_dd_idx
+            current_gap = recovery_target - pnl_path.iloc[-1]
+            mean_return = data.mean()
+            additional_periods = current_gap / mean_return if mean_return > 0 else np.nan
+            recovery_periods = elapsed_periods + additional_periods
+        recovery_duration_years = recovery_periods / periods_per_year
+
+        # Lag-1 Autocorrelation
+        autocorr = data.autocorr(lag=1)
+
+        # FF3 Regression (for asset excess returns vs. Mkt, SMB, and HML)
+        # Ensure that the factor columns exist and align with the asset data
+        if all(f in df.columns for f in ff3_factors):
+            # Extract factor data aligned to the asset's data index
+            factors_data = df[ff3_factors].loc[data.index].dropna()
+            # Align asset returns with the factor data
+            aligned_data = data.loc[factors_data.index]
+            if len(aligned_data) > 0:
+                X = sm.add_constant(factors_data)
+                model = sm.OLS(aligned_data, X).fit()
+                ff3_alpha = model.params['const'] * periods_per_year
+                ff3_beta_mkt = model.params.get('Mkt', np.nan)
+                ff3_beta_smb = model.params.get('SMB', np.nan)
+                ff3_beta_hml = model.params.get('HML', np.nan)
+            else:
+                ff3_alpha = np.nan
+                ff3_beta_mkt = np.nan
+                ff3_beta_smb = np.nan
+                ff3_beta_hml = np.nan
+        else:
+            ff3_alpha = np.nan
+            ff3_beta_mkt = np.nan
+            ff3_beta_smb = np.nan
+            ff3_beta_hml = np.nan
+
+        # Store all performance measures including FF3 regression outputs
+        results[col] = {
+            "Ann. Mean": annualized_mean,
+            "Ann. Std Dev": annualized_std,
+            "Ann. Sharpe Ratio": annualized_sharpe,
+            "Ann. Sortino Ratio": annualized_sortino,
+            "Skew": skew(data),
+            "Kurtosis": kurtosis(data),
+            "Max Drawdown (CumCF)": max_drawdown,
+            f"Ann. VaR {int(cvar_alpha * 100)}%": annualized_var,
+            f"Ann. CVaR {int(cvar_alpha * 100)}%": annualized_cvar,
+            "Total Cashflow": total_cashflow,
+            "Win Rate": win_rate,
+            "Average Gain": avg_gain,
+            "Average Loss": avg_loss,
+            "Gain/Loss Ratio": gain_loss_ratio,
+            "Profit Factor": profit_factor,
+            "Calmar Ratio": calmar_ratio,
+            "Tail Ratio": tail_ratio,
+            "Recovery Duration (years)": recovery_duration_years,
+            "Lag-1 Autocorrelation": autocorr,
+            "FF3 Alpha": ff3_alpha,
+            "FF3 Beta (Mkt)": ff3_beta_mkt,
+            "FF3 Beta (SMB)": ff3_beta_smb,
+            "FF3 Beta (HML)": ff3_beta_hml
+        }
+
+    return pd.DataFrame(results).T

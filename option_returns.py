@@ -10,7 +10,7 @@ def Calculate_CashFlow(df, current_price, next_price):
     return (next_price - (1+df["RF"]) * current_price).shift(1)
 
 def Calculate_return(df, current_price, next_price):
-    ret = (next_price / current_price - (1 + df["RF"])).shift(1)
+    ret = (next_price / (current_price * (1 + df["RF"])) - 1).shift(1)
     # ret = ((next_price - (1+df["RF"]) * current_price) / current_price).shift(1)
     # ret = Calculate_CashFlow(df, current_price, next_price) / current_price.shift(-1)
     return ret
