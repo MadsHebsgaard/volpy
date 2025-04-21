@@ -426,7 +426,7 @@ def add_r_to_od(od, ZCY_curves):
     od = od.groupby("date", group_keys=False).apply(compute_rates_for_date)
     return od
 
-def vectorized_iv(F, K, T, market_price, cp_flag, tol=1e-6, max_iter=100):
+def vectorized_iv(F, K, T, market_price, cp_flag, tol=1e-6, max_iter=300):
     sigma = np.full_like(F, 0.2, dtype=float)
     for _ in range(max_iter):
         # Clip sigma to remain within a reasonable range
@@ -468,7 +468,77 @@ def vectorized_iv(F, K, T, market_price, cp_flag, tol=1e-6, max_iter=100):
     return sigma
 
 
-def add_bid_mid_ask_IV(od, IV_type):
+from scipy.optimize import brentq
+from scipy.stats import norm
+import numpy as np
+
+def vectorized_iv_safer(F, K, T, market_price, cp_flag,
+                  tol=1e-6, max_iter=50,
+                  sigma_min=1e-6, sigma_max=5.0):
+    # 1) initial guess & convergence mask
+    sigma     = np.full_like(F, 0.2, dtype=float)
+    converged = np.zeros_like(F, dtype=bool)
+
+    # 2) pre‐compute intrinsic value & mark floor‐cases
+    intrinsic = np.where(cp_flag=='C', np.maximum(0, F-K), np.maximum(0, K-F))
+    floor_mask = market_price <= intrinsic + tol
+    sigma[floor_mask]    = sigma_min
+    converged[floor_mask] = True
+
+    for _ in range(max_iter):
+        # 3) clip bounds
+        sigma = np.clip(sigma, sigma_min, sigma_max)
+
+        # 4) compute price & vega
+        sqrtT = np.sqrt(T)
+        d1 = (np.log(F/K) + 0.5*sigma**2*T) / (sigma*sqrtT)
+        d2 = d1 - sigma*sqrtT
+
+        price = np.where(
+            cp_flag=='C',
+            F * norm.cdf(d1) - K * norm.cdf(d2),
+            K * norm.cdf(-d2) - F * norm.cdf(-d1)
+        )
+        vega = F * norm.pdf(d1) * sqrtT
+
+        # 5) Newton update only on unconverged & vega>0
+        diff = price - market_price
+        update_mask = (~converged) & (vega>0)
+        step = diff[update_mask] / vega[update_mask]
+        # avoid huge jumps
+        step = np.clip(step, -1.0, 1.0)
+        sigma[update_mask] -= step
+
+        # 6) update convergence
+        newly = np.abs(diff) < tol
+        converged |= newly
+        if converged.all():
+            break
+
+    # 7) fallback bisection on anything still unconverged
+    bad = ~converged
+    for i in np.where(bad)[0]:
+        def f(s):
+            if T[i]==0:
+                return intrinsic[i] - market_price[i]
+            sq = np.sqrt(T[i])
+            d1i = (np.log(F[i]/K[i]) + 0.5*s**2*T[i])/(s*sq)
+            d2i = d1i - s*sq
+            pi = (F[i]*norm.cdf(d1i) - K[i]*norm.cdf(d2i)
+                  if cp_flag[i]=='C'
+                  else K[i]*norm.cdf(-d2i) - F[i]*norm.cdf(-d1i))
+            return pi - market_price[i]
+
+        try:
+            sigma[i] = brentq(f, sigma_min, sigma_max, xtol=tol)
+        except ValueError:
+            sigma[i] = np.nan
+
+    return sigma
+
+
+
+def add_bid_mid_ask_IV(od, IV_type, safer_version = False):
 
     TTM_var = days_type() + "TTM"
 
@@ -484,7 +554,10 @@ def add_bid_mid_ask_IV(od, IV_type):
     K = od["K"].values
     cp_flag = od["cp_flag"].values  # Assumes an array of "C" and "P"
 
-    IV = vectorized_iv(F, K, T, market_price, cp_flag)
+    if safer_version:
+        IV = vectorized_iv_safer(F, K, T, market_price, cp_flag)
+    else:
+        IV = vectorized_iv(F, K, T, market_price, cp_flag)
     return IV
 
 
@@ -804,7 +877,7 @@ def process_od_rdy(od_rdy, calc_func, **kwargs):
 def replicate_SW(group, n_points = 100):
     """
     For each group (e.g. a single (date, ticker, maturity)), build an implied volatility
-    curve on moneyness k = ln(K/F), interpolate to a dense grid of ±8 stdevs,
+    curve on moneyness k = ln(K/F), interpolate to a dense grid of ±10 stdevs,
     price out-of-the-money options, and numerically integrate to approximate
     the variance swap rate per Carr & Wu (2009).
 
@@ -836,8 +909,8 @@ def replicate_SW(group, n_points = 100):
     iv_data = group["IV"].values
 
     # 3) Define a fine moneyness grid ±8 stdevs from 0 (i.e. from -8*stdev to +8*stdev)
-    k_min = -8 * stdev
-    k_max = 8 * stdev
+    k_min = -10 * stdev
+    k_max = 10 * stdev
     k_grid = np.linspace(k_min, k_max, n_points)  # 2000 points ect.
 
     # Convert moneyness back to strikes
@@ -884,6 +957,183 @@ def replicate_SW(group, n_points = 100):
     group["var_swap_rate"] = var_swap_rate
 
     return group
+
+
+
+
+def replicate_SW_k(group, n_points = 100):
+    """
+    For each group (e.g. a single (date, ticker, maturity)), build an implied volatility
+    curve on moneyness k = ln(K/F), interpolate to a dense grid of ±10 stdevs,
+    price out-of-the-money options, and numerically integrate to approximate
+    the variance swap rate per Carr & Wu (2009).
+
+    Returns the group with a new column 'var_swap_rate'.
+    """
+
+    TTM_var = days_type() + "TTM"
+
+    group = group.copy()
+
+    # Extract relevant parameters (assuming they're constant within this group)
+    F = group["F"].iloc[0]
+    r = group["r"].iloc[0]
+    T = group[TTM_var].iloc[0]  # T in years (e.g. days / 365)
+
+    # 1) Average implied volatility as a rough stdev estimate
+    #    (This is the "standard deviation" used to define ±8 stdev range.)
+    avg_iv = group["IV"].mean()
+    stdev = avg_iv * np.sqrt(T)
+
+    # 2) Convert strikes to moneyness k = ln(K/F)
+    group["k"] = np.log(group["K"] / F)
+
+    # Sort by k
+    group = group.sort_values("k")
+
+    # Arrays of available moneyness and implied vol
+    K_data = group["K"].values
+    iv_data = group["IV"].values
+
+    # 3) Define a fine moneyness grid ±8 stdevs from 0 (i.e. from -8*stdev to +8*stdev)
+    k_min = -10 * stdev
+    k_max = 10 * stdev
+    k_grid = np.linspace(k_min, k_max, n_points)  # 2000 points ect.
+
+    # Convert moneyness back to strikes
+    K_grid = F * np.exp(k_grid)
+
+
+    # 4) Interpolate implied vol across k_grid
+    #    Extrapolate by taking the edge vol for K < K_data.min() or K > K_data.max().
+    iv_grid = np.interp(K_grid, K_data, iv_data,
+                        left=iv_data[0],
+                        right=iv_data[-1])
+
+    # 5) Compute out-of-the-money option prices:
+    #    Cal if K>F and put else: only out-of-the-money options are used.
+    is_call = (K_grid > F)  # Boolean array for call/put decision
+    # d1 = (np.log(F / K_grid) + (r + 0.5 * iv_grid ** 2) * T) / (iv_grid * np.sqrt(T)) # Not the forward method (r should be removed)
+    d1 = (np.log(F / K_grid) + 0.5 * iv_grid ** 2 * T) / (iv_grid * np.sqrt(T))
+    d2 = d1 - iv_grid * np.sqrt(T)
+    call_prices = np.exp(-r * T) * (F * norm.cdf(d1) - K_grid * norm.cdf(d2))
+    put_prices = call_prices - np.exp(-r * T) * (F - K_grid)
+    option_prices = np.where(is_call, call_prices, put_prices)
+
+    # 6) Approximate the variance swap rate by numerical integration over K:
+    #    The continuous-time formula is roughly:
+    #
+    #    VarSwap ≈ 2 * e^{rT} / T * ∫_{0}^{∞} [OTMOptionPrice(K)] / K^2 dK
+    #
+    #    For numerical integration, we use trapezoidal rule: np.trapz(y, x).
+    #
+    #    Important detail: BSM_call_put returns a present value. The formula
+    #    typically wants the undiscounted payoff. We'll re-scale accordingly.
+
+    # The OTM option price from BSM_call_put is discounted, so multiply by e^{rT}.
+    undiscounted_option_prices = option_prices * np.exp(r * T)
+
+    # Perform the integral ∫(OTMPrice(K)/K^2) dK from K_min to K_max
+    integrand = undiscounted_option_prices / (K_grid ** 2)
+    integral_value = np.trapz(integrand, K_grid)
+
+    # Multiply by the prefactor (2 / T)
+    var_swap_rate = (2.0 / T) * integral_value
+
+    # Store result in the group
+    group["var_swap_rate"] = var_swap_rate
+
+    return group
+
+
+
+
+def replicate_SW_K(group, n_points = 100):
+    """
+    For each group (e.g. a single (date, ticker, maturity)), build an implied volatility
+    curve on moneyness k = ln(K/F), interpolate to a dense grid of ±10 stdevs,
+    price out-of-the-money options, and numerically integrate to approximate
+    the variance swap rate per Carr & Wu (2009).
+
+    Returns the group with a new column 'var_swap_rate'.
+    """
+
+    TTM_var = days_type() + "TTM"
+
+    group = group.copy()
+
+    # Extract relevant parameters (assuming they're constant within this group)
+    F = group["F"].iloc[0]
+    r = group["r"].iloc[0]
+    T = group[TTM_var].iloc[0]  # T in years (e.g. days / 365)
+
+    # 1) Average implied volatility as a rough stdev estimate
+    #    (This is the "standard deviation" used to define ±8 stdev range.)
+    avg_iv = group["IV"].mean()
+    stdev = avg_iv * np.sqrt(T)
+
+    # 2) Convert strikes to moneyness k = ln(K/F)
+    group["k"] = np.log(group["K"] / F)
+
+    # Sort by k
+    group = group.sort_values("k")
+
+    # Arrays of available moneyness and implied vol
+    K_data = group["K"].values
+    iv_data = group["IV"].values
+
+    # 3) Define a fine moneyness grid ±8 stdevs from 0 (i.e. from -8*stdev to +8*stdev)
+    k_min = -10 * stdev
+    k_max = 10 * stdev
+
+    K_min = F * np.exp(k_min)
+    K_max = F * np.exp(k_max)
+
+    K_grid = np.linspace(K_min, K_max, n_points)  # 2000 points ect.
+
+
+    # 4) Interpolate implied vol across k_grid
+    #    Extrapolate by taking the edge vol for K < K_data.min() or K > K_data.max().
+    iv_grid = np.interp(K_grid, K_data, iv_data,
+                        left=iv_data[0],
+                        right=iv_data[-1])
+
+    # 5) Compute out-of-the-money option prices:
+    #    Cal if K>F and put else: only out-of-the-money options are used.
+    is_call = (K_grid > F)  # Boolean array for call/put decision
+    # d1 = (np.log(F / K_grid) + (r + 0.5 * iv_grid ** 2) * T) / (iv_grid * np.sqrt(T)) # Not the forward method (r should be removed)
+    d1 = (np.log(F / K_grid) + 0.5 * iv_grid ** 2 * T) / (iv_grid * np.sqrt(T))
+    d2 = d1 - iv_grid * np.sqrt(T)
+    call_prices = np.exp(-r * T) * (F * norm.cdf(d1) - K_grid * norm.cdf(d2))
+    put_prices = call_prices - np.exp(-r * T) * (F - K_grid)
+    option_prices = np.where(is_call, call_prices, put_prices)
+
+    # 6) Approximate the variance swap rate by numerical integration over K:
+    #    The continuous-time formula is roughly:
+    #
+    #    VarSwap ≈ 2 * e^{rT} / T * ∫_{0}^{∞} [OTMOptionPrice(K)] / K^2 dK
+    #
+    #    For numerical integration, we use trapezoidal rule: np.trapz(y, x).
+    #
+    #    Important detail: BSM_call_put returns a present value. The formula
+    #    typically wants the undiscounted payoff. We'll re-scale accordingly.
+
+    # The OTM option price from BSM_call_put is discounted, so multiply by e^{rT}.
+    undiscounted_option_prices = option_prices * np.exp(r * T)
+
+    # Perform the integral ∫(OTMPrice(K)/K^2) dK from K_min to K_max
+    integrand = undiscounted_option_prices / (K_grid ** 2)
+    integral_value = np.trapz(integrand, K_grid)
+
+    # Multiply by the prefactor (2 / T)
+    var_swap_rate = (2.0 / T) * integral_value
+
+    # Store result in the group
+    group["var_swap_rate"] = var_swap_rate
+
+    return group
+
+
 
 
 import matplotlib.pyplot as plt
