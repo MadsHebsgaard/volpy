@@ -933,7 +933,7 @@ def fetch_dividends_progress(db, begdate, enddate, tickers, csv_path):
 #     return Option_metrics_path
 
 
-def fetch_wrds_data(db, profile, folder_name, begdate, enddate, tickers=None, data_types=["O", "F", "S", "Z"], return_df=False, progress=False, chunk_size = 1500000):
+def fetch_wrds_data(db, folder_name, begdate, enddate, tickers=None, data_types=["O", "F", "S", "Z"], return_df=False, progress=False, chunk_size = 1500000):
     """
     Henter WRDS data (options, forward prices, stock returns) og gemmer i en mappe.
     
@@ -953,7 +953,7 @@ def fetch_wrds_data(db, profile, folder_name, begdate, enddate, tickers=None, da
     """
 
     # Find base directory for brugerprofil
-    base_dir = load.dirs(profile)["OptionMetrics"] / folder_name
+    base_dir = load.dirs()["OptionMetrics"] / folder_name
     # base_dir = load.Option_metrics_path_from_profile(profile) / folder_name # todo: use this function instead, haven't tested
 
 
