@@ -117,34 +117,32 @@ def summary_dly_df_creator(od):
 
     return summary_dly_df
 
-def load_clean_and_prepare_od(om_folder, tickers=None, first_day=None, last_day=None, IV_type = "od"):
+def load_clean_and_prepare_od(om_folder, tickers=None, first_day=None, last_day=None, IV_type = "od", safe_slow_IV = False):
     # load data
     print(f"{days_type()} was selected in global_settings.py")
     od, FW, ZCY_curves, returns_and_prices = load_od_FW_ZCY(om_folder, tickers=tickers)
-
 
     if first_day is None:   first_day = od["date"].min()
     if last_day is None:    last_day = od["date"].max()
 
     # add forward (before cleaning such that od_raw has the forward rate, used in options trats for ATM options that might be slightly ITM)
     od = vp.add_FW_to_od(od, FW)
-    # print(od["F"])
 
     # add IV to options (bid/ask/mid/om)
-    od["IV"] = vp.add_bid_mid_ask_IV(od, IV_type)
+    od["IV"] = vp.add_bid_mid_ask_IV(od, IV_type, safe_slow_IV = safe_slow_IV)
+    od[f"IV_{IV_type}"] = od["IV"]
 
     od_raw = od
 
     # clean data (should be looked upon)
     od = clean_od(od, first_day=first_day, last_day=last_day)
-    # print(od.shape)
     # remove if ITM
     od = od.loc[((od["F"] < od["K"]) & (od["cp_flag"] == "C")) | ((od["F"] > od["K"]) & (od["cp_flag"] == "P"))]
     # print(od.shape, "sdsfd")
 
     # add r to options
     od = vp.add_r_to_od_parallel(od, ZCY_curves)
-    # print(od.shape)
+    print("Data loaded")
 
     return od, returns_and_prices, od_raw
 
@@ -176,15 +174,22 @@ def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None,
     return summary_dly_df, od_rdy
 
 
-def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ"]):
+def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ", "SPX", "other_vol_indexes"]):
     import pandas as pd
     import requests
     from io import BytesIO
     from zipfile import ZipFile
 
-    # Load FF5 Daily Data
-    # https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html
+    # Urls
     url_ff5 = "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_5_Factors_2x3_daily_CSV.zip"
+    url_mom = "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Momentum_Factor_daily_CSV.zip"
+    url_bab = "https://www.aqr.com/-/media/AQR/Documents/Insights/Data-Sets/Betting-Against-Beta-Equity-Factors-Daily.xlsx"
+    url_qmj = "https://www.aqr.com/-/media/AQR/Documents/Insights/Data-Sets/Quality-Minus-Junk-Factors-Daily.xlsx"
+    url_vix = "https://fred.stlouisfed.org/graph/fredgraph.csv?bgcolor=%23ebf3fb&chart_type=line&drp=0&fo=open%20sans&graph_bgcolor=%23ffffff&height=450&mode=fred&recession_bars=on&txtcolor=%23444444&ts=12&tts=12&width=1320&nt=0&thu=0&trc=0&show_legend=yes&show_axis_titles=yes&show_tooltip=yes&id=VIXCLS&scale=left&cosd=1990-01-02&coed=2025-04-16&line_color=%230073e6&link_values=false&line_style=solid&mark_type=none&mw=3&lw=3&ost=-99999&oet=99999&mma=0&fml=a&fq=Daily%2C%20Close&fam=avg&fgst=lin&fgsnd=2020-02-01&line_index=1&transformation=lin&vintage_date=2025-04-21&revision_date=2025-04-21&nd=1990-01-02"
+
+    # Load FF5 Daily Data
+    # fast as zip file
+    # https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html
     response_ff5 = requests.get(url_ff5)
     zip_file_ff5 = ZipFile(BytesIO(response_ff5.content))
     csv_filename_ff5 = zip_file_ff5.namelist()[0]
@@ -201,8 +206,9 @@ def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ"]):
 
     if "UMD" in Factor_list:
         # Load Momentum (UMD) Daily Data
+        # fast as zip file
         # https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html
-        url_mom = "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Momentum_Factor_daily_CSV.zip"
+
         response_mom = requests.get(url_mom)
         zip_file_mom = ZipFile(BytesIO(response_mom.content))
         csv_filename_mom = zip_file_mom.namelist()[0]
@@ -222,9 +228,8 @@ def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ"]):
 
     if "BAB" in Factor_list:
         # Add BAB
-        # Slow as not in .zip folder and a lot of data (~28MB)
+        # Slow as not in .zip folder and a lot of data (~28 MB)
         # https://www.aqr.com/Insights/Datasets/Betting-Against-Beta-Equity-Factors-Daily
-        url_bab = "https://www.aqr.com/-/media/AQR/Documents/Insights/Data-Sets/Betting-Against-Beta-Equity-Factors-Daily.xlsx"
 
         # Read the Excel file:
         df_bab = pd.read_excel(url_bab, skiprows=18, usecols="A:AD", nrows=24914)
@@ -236,9 +241,8 @@ def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ"]):
 
     if "QMJ" in Factor_list:
         # Add QMJ
-        # Slow as not in .zip folder and a lot of data (~28MB)
+        # Slow as not in .zip folder and a lot of data (~28 MB)
         # https://www.aqr.com/Insights/Datasets/Quality-Minus-Junk-Factors-Daily
-        url_qmj = "https://www.aqr.com/-/media/AQR/Documents/Insights/Data-Sets/Quality-Minus-Junk-Factors-Daily.xlsx"
 
         # Read the Excel file:
         df_qmj = pd.read_excel(url_qmj, skiprows=18, usecols="A:AD", nrows=17313)
@@ -250,6 +254,26 @@ def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ"]):
 
         columns_reordered = [col for col in df.columns if col != 'RF'] + ['RF']
         df = df[columns_reordered]
+        df.reset_index(inplace=True)
+
+    if "SPX" in Factor_list:
+        # Add VIX
+        # Fast as very small dataset (~151 KB)
+        # https://fred.stlouisfed.org/series/VIXCLS
+
+        df_vix = pd.read_csv(url_vix)
+        df_vix.rename(columns={'observation_date': 'date', 'VIXCLS': 'VIX'}, inplace=True)
+        df_vix['date'] = pd.to_datetime(df_vix['date'])
+        df_vix.set_index('date', inplace=True)
+        df_vix = df_vix[['VIX']]
+        df_vix['VIX'] = df_vix['VIX']/100
+
+        # Merge with the main dataframe
+        df.set_index('date', inplace=True)
+        df = df.join(df_vix, how='left')
+
+    if "other_vol_indexes" in Factor_list:
+        # add them here
 
     df.reset_index(inplace=True)
     return df
