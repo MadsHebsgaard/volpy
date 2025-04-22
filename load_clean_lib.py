@@ -117,34 +117,32 @@ def summary_dly_df_creator(od):
 
     return summary_dly_df
 
-def load_clean_and_prepare_od(om_folder, tickers=None, first_day=None, last_day=None, IV_type = "od"):
+def load_clean_and_prepare_od(om_folder, tickers=None, first_day=None, last_day=None, IV_type = "od", safe_slow_IV = False):
     # load data
     print(f"{days_type()} was selected in global_settings.py")
     od, FW, ZCY_curves, returns_and_prices = load_od_FW_ZCY(om_folder, tickers=tickers)
-
 
     if first_day is None:   first_day = od["date"].min()
     if last_day is None:    last_day = od["date"].max()
 
     # add forward (before cleaning such that od_raw has the forward rate, used in options trats for ATM options that might be slightly ITM)
     od = vp.add_FW_to_od(od, FW)
-    # print(od["F"])
 
     # add IV to options (bid/ask/mid/om)
-    od["IV"] = vp.add_bid_mid_ask_IV(od, IV_type)
+    od["IV"] = vp.add_bid_mid_ask_IV(od, IV_type, safe_slow_IV = safe_slow_IV)
+    od[f"IV_{IV_type}"] = od["IV"]
 
     od_raw = od
 
     # clean data (should be looked upon)
     od = clean_od(od, first_day=first_day, last_day=last_day)
-    # print(od.shape)
     # remove if ITM
     od = od.loc[((od["F"] < od["K"]) & (od["cp_flag"] == "C")) | ((od["F"] > od["K"]) & (od["cp_flag"] == "P"))]
     # print(od.shape, "sdsfd")
 
     # add r to options
     od = vp.add_r_to_od_parallel(od, ZCY_curves)
-    # print(od.shape)
+    print("Data loaded")
 
     return od, returns_and_prices, od_raw
 
@@ -176,7 +174,7 @@ def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None,
     return summary_dly_df, od_rdy
 
 
-def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ", "VIX"]):
+def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ", "SPX", "other_vol_indexes"]):
     import pandas as pd
     import requests
     from io import BytesIO
@@ -258,7 +256,7 @@ def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ", "VIX"]):
         df = df[columns_reordered]
         df.reset_index(inplace=True)
 
-    if "VIX" in Factor_list:
+    if "SPX" in Factor_list:
         # Add VIX
         # Fast as very small dataset (~151 KB)
         # https://fred.stlouisfed.org/series/VIXCLS
@@ -268,10 +266,15 @@ def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ", "VIX"]):
         df_vix['date'] = pd.to_datetime(df_vix['date'])
         df_vix.set_index('date', inplace=True)
         df_vix = df_vix[['VIX']]
+        df_vix['VIX'] = df_vix['VIX']/100
 
         # Merge with the main dataframe
         df.set_index('date', inplace=True)
         df = df.join(df_vix, how='left')
+
+    if "other_vol_indexes" in Factor_list:
+        # add them here
+
     df.reset_index(inplace=True)
     return df
 

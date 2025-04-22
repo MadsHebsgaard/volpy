@@ -16,11 +16,12 @@ def Calculate_return(df, current_price, next_price):
     return ret
 
 
-def prepare_stock(df, curr_OTMs):
+def prepare_for_sgys(df, curr_OTMs):
     df = add_stock_sgy(df)
     df = add_stock_adj_close(df)
     df = D_PC_option_prices(df, curr_OTMs)
     return df
+
 
 def add_stock_adj_close(df):
     def compute_adj_close(group):
@@ -43,8 +44,19 @@ def add_stock_adj_close(df):
         return start * factor
 
     # Apply to each ticker
-    df["adj_close"] = df.groupby("ticker").apply(lambda g: compute_adj_close(g)).reset_index(level=0, drop=True)
+    # df["adj_close"] = df.groupby("ticker").apply(lambda g: compute_adj_close(g)).reset_index(level=0, drop=True)
+
+    # this currently comes back as a DataFrame if your returned Series has a name
+    tmp = df.groupby("ticker") \
+        .apply(compute_adj_close) \
+        .reset_index(level=0, drop=True)
+
+    # squeeze it down (turns a single‑col DataFrame into a Series)
+    df["adj_close"] = tmp.squeeze()
+
     return df
+
+
 
 def D_PC_option_prices(df, OTMs):
     ATM_str = "ATM"

@@ -42,6 +42,7 @@ def load_option_data(file_path):
     df.rename(columns={"best_bid": "bid"}, inplace=True)
     df.rename(columns={"best_offer": "ask"}, inplace=True)
     df.rename(columns={"impl_volatility": "IV_om"}, inplace=True)
+    df['mid'] = (df['bid'] + df['ask'])/2
 
     # Format columns
     df['date'] = pd.to_datetime(df['date'], format='%Y-%m-%d', errors='coerce')
@@ -538,7 +539,7 @@ def vectorized_iv_safer(F, K, T, market_price, cp_flag,
 
 
 
-def add_bid_mid_ask_IV(od, IV_type, safer_version = False):
+def add_bid_mid_ask_IV(od, IV_type, safe_slow_IV = False):
 
     TTM_var = days_type() + "TTM"
 
@@ -554,7 +555,7 @@ def add_bid_mid_ask_IV(od, IV_type, safer_version = False):
     K = od["K"].values
     cp_flag = od["cp_flag"].values  # Assumes an array of "C" and "P"
 
-    if safer_version:
+    if safe_slow_IV:
         IV = vectorized_iv_safer(F, K, T, market_price, cp_flag)
     else:
         IV = vectorized_iv(F, K, T, market_price, cp_flag)
@@ -563,6 +564,10 @@ def add_bid_mid_ask_IV(od, IV_type, safer_version = False):
 
 def process_group_activity_summary(group):
     days_var = days_type() + "days"  # fx "t_days" eller "c_days"
+    if days_var == "t_days":
+        target_days = 21
+    else:
+        target_days = 30
 
     if days_type() == "t_" and clean_t_days():
         x = 1
@@ -594,15 +599,15 @@ def process_group_activity_summary(group):
         return group, summary
 
     # Vælg de to dage, der skal bruges – opdel unikke dage i dem under og over 30 dage
-    days_below_30 = unique_days[(unique_days <= 30) & (unique_days > 8)]
-    days_above_30 = unique_days[unique_days > 30]
+    days_below_target = unique_days[(unique_days <= target_days) & (unique_days > 8)]
+    days_above_target = unique_days[unique_days > target_days]
     
-    if len(days_below_30) > 0 and len(days_above_30) > 0:
-        low_2_days = [max(days_below_30), min(days_above_30)]
-    elif len(days_below_30) >= 2:
-        low_2_days = list(days_below_30[-2:])
-    elif len(days_above_30) >= 2:
-        low_2_days = list(days_above_30[:2])
+    if len(days_below_target) > 0 and len(days_above_target) > 0:
+        low_2_days = [max(days_below_target), min(days_above_target)]
+    elif len(days_below_target) >= 2:
+        low_2_days = list(days_below_target[-2:])
+    elif len(days_above_target) >= 2:
+        low_2_days = list(days_above_target[:2])
     
     if len(unique_days) < 3 and unique_days[0] <= 8:
         summary["Active"] = False
@@ -1134,6 +1139,33 @@ def replicate_SW_K(group, n_points = 100):
     return group
 
 
+def load_analyze_create_swap(om_folder="i2s1_full_v2", ticker_list=["SPX", "OEX"], first_day=None, last_day=None,
+                             IV_type="om", save_files = True, safe_slow_IV = False):
+    # Load data and clean
+    od, returns_and_prices, od_raw = load_clean_lib.load_clean_and_prepare_od(om_folder=om_folder,
+                                                                              tickers=ticker_list,
+                                                                              first_day=None,
+                                                                              last_day=None,
+                                                                              IV_type=IV_type,
+                                                                              safe_slow_IV = safe_slow_IV)
+    # Calculate results such as SW, RV ect.
+    summary_dly_df, od_rdy = load_clean_lib.create_summary_dly_df(od, returns_and_prices,
+                                                                  first_day=None,
+                                                                  last_day=None,
+                                                                  n_grid=2000)
+    summary_dly_df = interpolate_swaps_and_returns(summary_dly_df)
+    summary_dly_df = summary_dly_df.reset_index()
+
+    # save
+    if save_files:
+        output_dir = load_clean_lib.volpy_output_dir(om_folder)
+        time_type = days_type()
+        summary_dly_df.to_csv(f"{output_dir}/{time_type}summary_dly.csv", index=False)
+        od_raw.to_csv(f"{output_dir}/{time_type}od_raw.csv", index=False)
+        # od_rdy.to_csv(f"{output_dir}/{time_type}od_rdy.csv", index=False)
+
+    return summary_dly_df, od_raw
+
 
 
 import matplotlib.pyplot as plt
@@ -1218,13 +1250,13 @@ def create_sgy_list(sgy_common = "CF_D_30_", sgy_list = ["straddle", "strangle_1
     return [sgy_common + sgy for sgy in sgy_list] + ["CF_30_SW_day", "r_30_SW_day"]
 
 
-def return_df(df_big, sgy_list = create_sgy_list(), ticker_list = ["SPX"]):
+def return_df(df_big, sgy_list = create_sgy_list(), ticker_list = ["SPX"], extra_columns = []):
     df = df_big[df_big["ticker"].isin(ticker_list)]
 
     df = df[df["CF_D_30_put_ATM"].isna() == False]
     df = df[df["CF_D_30_call_ATM"].isna() == False]
 
-    col_list = ["date", "r_stock"] + sgy_list
+    col_list = ["date", "r_stock"] + sgy_list + extra_columns
     df = df[col_list]
     return df
 
@@ -1330,10 +1362,13 @@ def plot_returns(df, sgy_common, sgy_names, factors):
     plt.show()
 
 
-def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strangle_15%", "call_ATM", "put_ATM"], factors=['Mkt', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF'], sign=True, scale=True, plot = False, ticker_list = ["SPX"]):
-    sgy_list = create_sgy_list(sgy_common, sgy_names)
-    df = return_df(df, sgy_list = sgy_list, ticker_list = ticker_list)
+def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strangle_15%", "call_ATM", "put_ATM"], factors=['Mkt', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF', 'VIX'], sign=True, scale=True, plot = False, ticker_list = ["SPX"], extra_columns = []):
+    if sgy_names is None:
+        sgy_names = [col.replace(sgy_common, "") for col in df.columns if sgy_common in col]
 
+    sgy_list = create_sgy_list(sgy_common, sgy_names)
+
+    df = return_df(df, sgy_list = sgy_list, ticker_list = ticker_list, extra_columns = extra_columns)
     df = add_factor_df_columns(df, factors)
 
     if sign:
@@ -1669,3 +1704,159 @@ def compute_extensive_performance_measures_cashflows_FF_factors(df, cvar_alpha=0
         }
 
     return pd.DataFrame(results).T
+
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
+def plot_timeseries_with_pct(df, alpha=0.1, var="days", var_name=None, savefig=False, figsize = (12, 6)):
+
+    # ensure your DataFrame is datetime‑indexed
+    # SPX_df['date'] = pd.to_datetime(SPX_df['date'])
+    # SPX_df.set_index('date', inplace=True)
+
+    df[f'high {var}'] = np.where(df[f'low {var}'] == 21, 21, df[f'high {var}']) # technically should depend on if c_ or t_ days
+
+    # half‑year window
+    window_size = 21 * 6  # ≈126 trading days
+
+    # rolling means
+    rolling_high = df[f'high {var}'] \
+        .rolling(window=window_size, min_periods=window_size) \
+        .mean() \
+        .dropna()
+
+    rolling_low = df[f'low {var}'] \
+        .rolling(window=window_size, min_periods=window_size) \
+        .mean() \
+        .dropna()
+
+    if alpha is not None:
+        # rolling percentiles
+        high_lower = df[f'high {var}'] \
+            .rolling(window=window_size, min_periods=window_size) \
+            .quantile(alpha) \
+            .dropna()
+
+        high_upper = df[f'high {var}'] \
+            .rolling(window=window_size, min_periods=window_size) \
+            .quantile(1 - alpha) \
+            .dropna()
+
+        low_lower = df[f'low {var}'] \
+            .rolling(window=window_size, min_periods=window_size) \
+            .quantile(alpha) \
+            .dropna()
+
+        low_upper = df[f'low {var}'] \
+            .rolling(window=window_size, min_periods=window_size) \
+            .quantile(1 - alpha) \
+            .dropna()
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    if var == "days":
+        # reference line at 21 days
+        ax.axhline(y=21, color="black", linestyle="--", alpha=0.75)
+
+    # plot rolling means and store line objects to extract colors
+    line_high, = ax.plot(rolling_high.index, rolling_high, label='High TTM', linewidth=1.5)
+    line_low, = ax.plot(rolling_low.index, rolling_low, label='Low TTM', linewidth=1.5)
+
+    if alpha is not None:
+        # get colors from the lines
+        high_color = line_high.get_color()
+        low_color = line_low.get_color()
+
+        # fill between with only facecolor (no edgecolor)
+        ax.fill_between(high_upper.index,
+                        high_lower,
+                        high_upper,
+                        facecolor=high_color,
+                        edgecolor=None,
+                        linewidth=0,
+                        alpha=0.2)
+
+        # draw the edges separately with their own alpha
+        ax.plot(high_lower.index, high_lower, color=high_color, linewidth=1, alpha=0.5)
+        ax.plot(high_upper.index, high_upper, color=high_color, linewidth=1, alpha=0.5)
+
+        ax.fill_between(low_upper.index,
+                        low_lower,
+                        low_upper,
+                        facecolor=low_color,
+                        edgecolor=None,
+                        linewidth=0,
+                        alpha=0.2)
+
+        ax.plot(low_lower.index, low_lower, color=low_color, linewidth=1, alpha=0.5)
+        ax.plot(low_upper.index, low_upper, color=low_color, linewidth=1, alpha=0.5)
+
+    # format the x‑axis to show one tick every two years
+    ax.xaxis.set_major_locator(mdates.YearLocator(2))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+    fig.autofmt_xdate()  # rotate & align
+
+    ax.legend()
+    # ax.set_title('Half‑Year Rolling Means with ±percentile bands')
+    ax.set_xlabel('Date')
+    ax.set_ylabel(var_name)
+    ax.grid(alpha=0.5)
+    ax.set_ylim(0, None)
+
+    plt.tight_layout()
+
+    if savefig:
+        plt.savefig(f"figures/summary/rolling average with percentiles ({var}).pdf")
+    plt.show()
+
+# define your window length
+def plot_lowest_number_of_strikes_timeseries(sum_df, savefig = False, figsize = (12, 6)):
+    from matplotlib.ticker import MultipleLocator
+
+    window_size = 21 * 12  # e.g. 252 days
+    alpha = 1 / window_size
+
+    # helper to average the bottom 5% of values in an array
+    def bottom_5pct_avg(x):
+        k = max(int(len(x) * alpha), 1)  # at least one value
+        # partition so first k entries are the k smallest (unsorted)
+        smallest_k = np.partition(x, k - 1)[:k]
+        return smallest_k.mean()
+
+    # apply rolling window with that custom function
+    rolling_bot5_high = sum_df['high #K'] \
+        .rolling(window=window_size, min_periods=window_size) \
+        .apply(bottom_5pct_avg, raw=True)
+    rolling_bot5_low = sum_df['low #K'] \
+        .rolling(window=window_size, min_periods=window_size) \
+        .apply(bottom_5pct_avg, raw=True)
+
+    # drop the initial NaNs (first window_size‑1 days)
+    rolling_bot5_high = rolling_bot5_high.dropna()
+    rolling_bot5_low = rolling_bot5_low.dropna()
+
+    # plot with true dates on x-axis (every other year)
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.plot(rolling_bot5_high.index, rolling_bot5_high, label='High TTM', linewidth=1)
+    ax.plot(rolling_bot5_low.index, rolling_bot5_low, label='Low  TTM', linewidth=1)
+
+    # format x-axis: a tick every other year
+    ax.xaxis.set_major_locator(mdates.YearLocator(2))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+    fig.autofmt_xdate()  # rotate labels
+
+    ax.legend()
+    # ax.set_title(f'Rolling average of the lowest {alpha*100:.1f}% of #K over the past year')
+    ax.set_xlabel('Date')
+    ax.set_ylabel('# Strikes')
+    ax.grid(alpha=0.5)
+    ax.set_ylim(0, None)
+
+    ax.yaxis.set_major_locator(MultipleLocator(10))
+
+    plt.tight_layout()
+
+    if savefig:
+        plt.savefig(f"figures/summary/lowest number of strikes timeseries.pdf")
+
+    plt.show()

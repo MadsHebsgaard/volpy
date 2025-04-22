@@ -30,7 +30,7 @@ def import_sum(om_folder):
 def create_od_hl(od_raw, sum_df, price_type, IV_type):
     days_var = days_type() + "days"
 
-    od_raw['price'] = od_raw[price_type]
+    od_raw['price'] = od_raw[price_type] # todo: Can be removed? what is 'od_raw['price']' used for?
 
     od_hl = od_raw.merge(
         sum_df[['ticker', 'date', 'high days', 'low days']],
@@ -45,7 +45,7 @@ def create_od_hl(od_raw, sum_df, price_type, IV_type):
     od_hl = od_hl.sort_values(by=['ticker', 'date'], ascending=True)
 
     od_hl["moneyness"] = np.log(od_hl["K"] / od_hl["F"])
-    od_hl["IV"] = od_hl[f"IV_{IV_type}"]
+    # od_hl["IV"] = od_hl[f"IV_{IV_type}"]
 
     return od_hl
 
@@ -187,3 +187,35 @@ def add_ATM_options_to_sum_df(sum_df, od_hl, od_raw, OTMs):
     sum_df = add_current_option_info(sum_df, od_hl, OTMs)
     sum_df = add_next_prices_to_sum(sum_df, od_raw)
     return sum_df
+
+
+def create_option_sgys(sum_df, od_raw, price_type="mid", IV_type="om", OTMs=[0.05, 0.15], save_files=True, om_folder = None):
+    import option_returns as orpy
+
+    # load data
+    od_hl = create_od_hl(od_raw=od_raw, sum_df=sum_df, price_type=price_type, IV_type=IV_type)
+    sum_df = add_F_to_sum_df(od_hl=od_hl, sum_df=sum_df)
+    sum_df = add_ATM_options_to_sum_df(sum_df=sum_df, od_hl=od_hl, od_raw=od_raw, OTMs=OTMs)
+
+    # add strategies
+    HL30_list = ["30"]  # ["low", "high", "30"], ["30"] # here 30 represents 21
+
+
+    df_orpy = sum_df.copy()
+    df_orpy = orpy.prepare_for_sgys(df_orpy, OTMs)
+
+    Strategies = [orpy.add_put_and_call_sgy, orpy.add_straddle_strangle_sgy, orpy.add_butterfly_spread_sgy,
+                  orpy.add_condor_strangle_sgy, orpy.add_stacked_straddle_sgy, orpy.add_full_stacked_straddle_sgy,
+                  orpy.add_full_stacked_strangle_sgy]
+    for add_sgy in Strategies:
+        df_orpy = add_sgy(df_orpy, OTMs, HL30_list)
+
+    # save
+    if save_files:
+        if om_folder is not None:
+            output_dir = load_clean_lib.volpy_output_dir(om_folder)
+            time_type = days_type()
+            df_orpy.to_csv(f"{output_dir}/{time_type}df_orpy.csv")
+            sum_df.to_csv(f"{output_dir}/{time_type}sum_df_big.csv")
+
+    return sum_df, df_orpy
