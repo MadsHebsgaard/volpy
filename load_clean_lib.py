@@ -10,6 +10,8 @@ import global_settings
 importlib.reload(global_settings)
 days_type = global_settings.days_type
 
+importlib.reload(vp)
+
 
 def dirs():
     profile = my_profile()
@@ -26,6 +28,7 @@ def dirs():
         "i2s1_full": Option_metrics_path / "i2s1_full",
         "s5_full": Option_metrics_path / "s5_full",
         "SPX_full_v2": Option_metrics_path / "SPX_full_v2",
+        "vix_markets_full": Option_metrics_path / "vix_markets_full",
     }
     return dir
 
@@ -273,7 +276,8 @@ def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ", "SPX", "other_vo
         df = df.join(df_vix, how='left')
 
     if "other_vol_indexes" in Factor_list:
-        2+2 # add them here
+        # add them here
+        print("add other vol indexes")
 
     df.reset_index(inplace=True)
     return df

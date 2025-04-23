@@ -5,6 +5,7 @@ from datetime import datetime
 import sys
 import time
 from itertools import islice
+import load_clean_lib
 
 # from global_settings import days_type
 import importlib
@@ -12,6 +13,8 @@ import global_settings
 importlib.reload(global_settings)
 days_type = global_settings.days_type
 clean_t_days = global_settings.clean_t_days
+
+importlib.reload(load_clean_lib)
 
 
 def load_option_data(file_path):
@@ -336,43 +339,56 @@ def compute_rates_for_date(group, ZCY_curves):
     days_var = "c_days"
 
     current_date = group["date"].iloc[0]
-    # Compute the yield curve for the current date once
-    ZCY_date = interpolate_yield_curve_between_dates(ZCY_curves, current_date)
-    ZCY_date = ZCY_date.sort_values(days_var)
-    x = ZCY_date[days_var].values
-    y = ZCY_date["rate"].values
 
-    # Get the target 'days' values for this group
-    target_days = group[days_var].values
-    interpolated_rates = np.empty_like(target_days, dtype=float)
+    try:
 
-    # Masks for in-range, below-range, and above-range target days
-    mask_in_range = (target_days >= x[0]) & (target_days <= x[-1])
-    mask_below = target_days < x[0]
-    mask_above = target_days > x[-1]
+        # Compute the yield curve for the current date once
+        ZCY_date = interpolate_yield_curve_between_dates(ZCY_curves, current_date)
+        ZCY_date = ZCY_date.sort_values(days_var)
+        x = ZCY_date[days_var].values
+        y = ZCY_date["rate"].values
 
-    # For in-range values, use numpy's vectorized interpolation
-    interpolated_rates[mask_in_range] = np.interp(target_days[mask_in_range], x, y)
+        # Get the target 'days' values for this group
+        target_days = group[days_var].values
+        interpolated_rates = np.empty_like(target_days, dtype=float)
 
-    # For target days below the minimum, extrapolate using the first two points
-    if np.any(mask_below):
-        x0, x1 = x[0], x[1]
-        y0, y1 = y[0], y[1]
-        interpolated_rates[mask_below] = y0 + (y1 - y0) * (target_days[mask_below] - x0) / (x1 - x0)
+        # Masks for in-range, below-range, and above-range target days
+        mask_in_range = (target_days >= x[0]) & (target_days <= x[-1])
+        mask_below = target_days < x[0]
+        mask_above = target_days > x[-1]
 
-    # For target days above the maximum, extrapolate using the last two points
-    if np.any(mask_above):
-        x0, x1 = x[-2], x[-1]
-        y0, y1 = y[-2], y[-1]
-        interpolated_rates[mask_above] = y0 + (y1 - y0) * (target_days[mask_above] - x0) / (x1 - x0)
+        # For in-range values, use numpy's vectorized interpolation
+        interpolated_rates[mask_in_range] = np.interp(target_days[mask_in_range], x, y)
 
-    group["r"] = interpolated_rates
-    return group
+        # For target days below the minimum, extrapolate using the first two points
+        if np.any(mask_below):
+            x0, x1 = x[0], x[1]
+            y0, y1 = y[0], y[1]
+            interpolated_rates[mask_below] = y0 + (y1 - y0) * (target_days[mask_below] - x0) / (x1 - x0)
+
+        # For target days above the maximum, extrapolate using the last two points
+        if np.any(mask_above):
+            x0, x1 = x[-2], x[-1]
+            y0, y1 = y[-2], y[-1]
+            interpolated_rates[mask_above] = y0 + (y1 - y0) * (target_days[mask_above] - x0) / (x1 - x0)
+
+        group["r"] = interpolated_rates
+        return group
+    except Exception:
+        import traceback, sys
+        print(f"\n🔥  ERROR in compute_rates_for_date for date {current_date!r} 🔥", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        # re-raise so the ProcessPoolExecutor still knows it failed
+        raise
 
 
 def add_r_to_od_parallel(od, ZCY_curves, max_workers=None):
     # Split the DataFrame into groups based on 'date'
     groups = [group for _, group in od.groupby("date", group_keys=False)]
+
+    # from volpy_parallel import add_r_to_od_parallel
+    # df = add_r_to_od_parallel(od, ZCY_curves, max_workers=4)
+    # df.head()
 
     # Use ProcessPoolExecutor to parallelize processing of each group
     with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
