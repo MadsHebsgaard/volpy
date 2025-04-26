@@ -177,7 +177,72 @@ def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None,
     return summary_dly_df, od_rdy
 
 
-def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ", "SPX", "other_vol_indexes"]):
+vol_symbols = [
+            "VIX",    # S&P500
+            "VXN",    # Nasdaq-100
+            "RVX",    # Russell 2000
+            "VXD",    # DJIA
+            "EVZ",    # Euro
+            "VXEWZ",  # Brazil
+            "VXEEM",  # Emerging Markets
+            "VIXTLT", # 20+ Yr U.S. Treasuries
+            "VXSLV",  # Silver
+            "OVX",    # Crude Oil
+            "VXAPL",  # Apple
+            "VXAZN",  # Amazon
+            "VXGOG",  # Google
+            "VXGS",   # Goldman Sachs
+            "VXIBM"   # IBM
+        ]
+
+# Mapping from ETF to underlying asset
+etf_to_underlying = {
+    "SPX": "S\\&P 500",
+    "QQQ": "Nasdaq‑100",
+    "IWM": "Russell 2000",
+    "DIA": "Dow J. Ind. Avg.",
+    "FXE": "Euro Currency",
+    "EWZ": "Brazil Eq.",
+    "EEM": "EM Eq.",
+    "TLT": "20+ Yr U.S. Treasuries",
+    "SLV": "Silver",
+    "USO": "Crude Oil",
+    "AAPL":  "Apple Inc.",
+    "AMZN":  "Amazon.com Inc.",
+    "GOOGL": "Alphabet Inc.",
+    "GS":    "Goldman Sachs Group",
+    "IBM":    "Intern. B. Machines"
+}
+
+# Volatility index mapping
+ticker_to_vol = {
+    "SPX": "VIX",
+    "QQQ": "VXN",
+    "IWM": "RVX",
+    "DIA": "VXD",
+    "FXE": "EVZ",
+    "EWZ": "VXEWZ",
+    "EEM": "VXEEM",
+    "TLT": "VIXTLT",
+    "SLV": "VXSLV",
+    "USO": "OVX",
+    "AAPL":  "VXAPL",
+    "AMZN":  "VXAZN",
+    "GOOGL": "VXGOG",
+    "GS":    "VXGS",
+    "IBM":   "VXIBM"
+}
+
+
+def ticker_to_vol_symbol(s):
+    for ticker, vol in ticker_to_vol.items():
+        if ticker in s:
+            return s.replace(ticker, vol)
+    return s  # unchanged if no match
+
+
+
+def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ", "vol_indexes"]):
     import pandas as pd
     import requests
     from io import BytesIO
@@ -188,7 +253,7 @@ def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ", "SPX", "other_vo
     url_mom = "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Momentum_Factor_daily_CSV.zip"
     url_bab = "https://www.aqr.com/-/media/AQR/Documents/Insights/Data-Sets/Betting-Against-Beta-Equity-Factors-Daily.xlsx"
     url_qmj = "https://www.aqr.com/-/media/AQR/Documents/Insights/Data-Sets/Quality-Minus-Junk-Factors-Daily.xlsx"
-    url_vix = "https://fred.stlouisfed.org/graph/fredgraph.csv?bgcolor=%23ebf3fb&chart_type=line&drp=0&fo=open%20sans&graph_bgcolor=%23ffffff&height=450&mode=fred&recession_bars=on&txtcolor=%23444444&ts=12&tts=12&width=1320&nt=0&thu=0&trc=0&show_legend=yes&show_axis_titles=yes&show_tooltip=yes&id=VIXCLS&scale=left&cosd=1990-01-02&coed=2025-04-16&line_color=%230073e6&link_values=false&line_style=solid&mark_type=none&mw=3&lw=3&ost=-99999&oet=99999&mma=0&fml=a&fq=Daily%2C%20Close&fam=avg&fgst=lin&fgsnd=2020-02-01&line_index=1&transformation=lin&vintage_date=2025-04-21&revision_date=2025-04-21&nd=1990-01-02"
+    # url_vix = "https://fred.stlouisfed.org/graph/fredgraph.csv?bgcolor=%23ebf3fb&chart_type=line&drp=0&fo=open%20sans&graph_bgcolor=%23ffffff&height=450&mode=fred&recession_bars=on&txtcolor=%23444444&ts=12&tts=12&width=1320&nt=0&thu=0&trc=0&show_legend=yes&show_axis_titles=yes&show_tooltip=yes&id=VIXCLS&scale=left&cosd=1990-01-02&coed=2025-04-16&line_color=%230073e6&link_values=false&line_style=solid&mark_type=none&mw=3&lw=3&ost=-99999&oet=99999&mma=0&fml=a&fq=Daily%2C%20Close&fam=avg&fgst=lin&fgsnd=2020-02-01&line_index=1&transformation=lin&vintage_date=2025-04-21&revision_date=2025-04-21&nd=1990-01-02"
 
     # Load FF5 Daily Data
     # fast as zip file
@@ -230,58 +295,47 @@ def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ", "SPX", "other_vo
         df = df.join(df_mom, how='inner')
 
     if "BAB" in Factor_list:
-        # Add BAB
-        # Slow as not in .zip folder and a lot of data (~28 MB)
-        # https://www.aqr.com/Insights/Datasets/Betting-Against-Beta-Equity-Factors-Daily
-
-        # Read the Excel file:
-        df_bab = pd.read_excel(url_bab, skiprows=18, usecols="A:AD", nrows=24914)
-
-        df_bab.rename(columns={'DATE': 'date'}, inplace=True)
+        df_bab = (
+            pd.read_excel(url_bab, skiprows=18, usecols="A:AD")
+            .rename(columns={'DATE': 'date'})
+        )
         df_bab['date'] = pd.to_datetime(df_bab['date'], format='%m/%d/%Y')
-        df = df.merge(df_bab[['date', 'USA']], on='date', how='left')
-        df.rename(columns={'USA': 'BAB'}, inplace=True)
+        df_bab.set_index('date', inplace=True)
+
+        # join the 'USA' column from df_bab as your BAB series
+        df['BAB'] = df_bab['USA']
 
     if "QMJ" in Factor_list:
-        # Add QMJ
-        # Slow as not in .zip folder and a lot of data (~28 MB)
-        # https://www.aqr.com/Insights/Datasets/Quality-Minus-Junk-Factors-Daily
-
-        # Read the Excel file:
-        df_qmj = pd.read_excel(url_qmj, skiprows=18, usecols="A:AD", nrows=17313)
-
-        df_qmj.rename(columns={'DATE': 'date'}, inplace=True)
+        df_qmj = (
+            pd.read_excel(url_qmj, skiprows=18, usecols="A:AD")
+            .rename(columns={'DATE': 'date'})
+        )
         df_qmj['date'] = pd.to_datetime(df_qmj['date'], format='%m/%d/%Y')
-        df = df.merge(df_qmj[['date', 'USA']], on='date', how='left')
-        df.rename(columns={'USA': 'QMJ'}, inplace=True)
+        df_qmj.set_index('date', inplace=True)
 
-        columns_reordered = [col for col in df.columns if col != 'RF'] + ['RF']
-        df = df[columns_reordered]
-        df.reset_index(inplace=True)
+        df['QMJ'] = df_qmj['USA']
 
-    if "SPX" in Factor_list:
-        # Add VIX
-        # Fast as very small dataset (~151 KB)
-        # https://fred.stlouisfed.org/series/VIXCLS
-
-        df_vix = pd.read_csv(url_vix)
-        df_vix.rename(columns={'observation_date': 'date', 'VIXCLS': 'VIX'}, inplace=True)
-        df_vix['date'] = pd.to_datetime(df_vix['date'])
-        df_vix.set_index('date', inplace=True)
-        df_vix = df_vix[['VIX']]
-        df_vix['VIX'] = df_vix['VIX']/100
-
-        # Merge with the main dataframe
-        df.set_index('date', inplace=True)
-        df = df.join(df_vix, how='left')
-
-    if "other_vol_indexes" in Factor_list:
-        # add them here
-        print("add other vol indexes")
+    if "vol_indexes" in Factor_list:
+        # download additional Cboe vol indexes directly
+        for sym in vol_symbols:
+            url = f"https://cdn.cboe.com/api/global/us_indices/daily_prices/{sym}_History.csv"
+            # read full CSV so we can detect if the column name is 'sym' or 'CLOSE'
+            df_tmp = pd.read_csv(url, parse_dates=["DATE"])
+            # pick the right "close" field
+            close_var = sym if sym in df_tmp.columns else "CLOSE"
+            df_tmp = df_tmp[["DATE", close_var]].rename(
+                columns={"DATE": "date", close_var: sym}
+            )
+            # scale to decimal
+            df_tmp[sym] = df_tmp[sym] / 100
+            df = df.merge(df_tmp[['date', sym]], on='date', how='left')
 
     df.reset_index(inplace=True)
     return df
 
 def download_factors():
     factor_df = download_factor_df()
+
+    import os
+    os.makedirs("data", exist_ok=True)
     factor_df.to_csv('data/factor_df.csv', index=False)

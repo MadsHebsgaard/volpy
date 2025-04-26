@@ -87,7 +87,7 @@ def price_heston_de(F, K, T, cp_flag,
 import mpmath as mp
 
 # --- set the working precision (decimal digits)
-mp.mp.dps = 30   # try 50, 75, 100… as needed
+mp.mp.dps = 17   # try 50, 75, 100… as needed
 
 # --- a version of your CF in mpmath land
 def _heston_cf_mp(u, F, T, kappa, theta, xi, rho, v0):
@@ -265,7 +265,7 @@ def price_model(F_arr, K_arr, T_arr, cp_flag_arr, ticker_arr, v0_arr,
 # --- helper to build test DataFrame
 def create_fake_option_df(TTM = 1/12.):
     K_low  = np.array([80, 90, 100, 110, 120])
-    K_high = np.arange(40,190,2)
+    K_high = np.arange(40,180,2)
     base = pd.DataFrame({'F':[100], 't_days': [0], 't_TTM':[TTM],'r':[0.056],'IV':[np.nan]})
     tickers = ['BS','MJD','Heston','SVMJD']
     frames = []
@@ -281,7 +281,13 @@ def create_fake_option_df(TTM = 1/12.):
     return pd.concat(frames,ignore_index=True)[['ticker','cp_flag','K','t_days','t_TTM','r','F','IV','low','high']]
 
 
+import os
+
 def main_table(df_merged):
+    output_dir = "figures\\Error RA"
+    os.makedirs(output_dir, exist_ok=True)  # Ensure the directory exists
+    output_path = os.path.join(output_dir, "main_table.txt")
+
     cols = ["ln vt/theta", "v0", "sigma_t^2", "analytic", "SW", "error", "error pct", "error jmp"]
     model_dfs = [
         ("Black–Scholes (BS) model", df_merged[df_merged["model"] == "BS"]),
@@ -290,44 +296,42 @@ def main_table(df_merged):
         ("MJD–stochastic volatility (SVMJD) model", df_merged[df_merged["model"] == "SVMJD"]),
     ]
 
-    print(r"\begin{table}[ht]")
-    print(r"    \centering")
-    print(r"    \begin{tabular}{lccccccc}")
-    print(r"        \toprule")
-    print(r"        $\ln(v_t/\theta)$ "
-          r"& $v_0$ "
-          r"& $\sigma_t^2$ "
-          r"& $\mathbb{E^Q}[RV]$ "
-          r"& $\widehat{SW}$ "
-          r"& Total error "
-          r"& Percentage error "
-          r"& Jump error $(\varepsilon)$ \\[-0.5ex]")
-    print(r"        &  "
-          r"&  "
-          r"&  "
-          r"&  "
-          r"& $(\mathbb{E^Q}[RV]-\widehat{SW})$ "
-          r"& $(\text{Total error} / \mathbb{E^Q}[RV])$ "
-          r"&  \\")
-    print(r"        \midrule")
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(r"\begin{table}[ht]" + "\n")
+        f.write(r"    \centering" + "\n")
+        f.write(r"    \begin{tabular}{lccccccc}" + "\n")
+        f.write(r"        \toprule" + "\n")
+        f.write(r"        $\ln(v_t/\theta)$ "
+                r"& $v_0$ "
+                r"& $\sigma_t^2$ "
+                r"& $\mathbb{E^Q}[RV]$ "
+                r"& $\widehat{SW}$ "
+                r"& Total error "
+                r"& Percentage error "
+                r"& Jump error $(\varepsilon)$ \\[-0.5ex]" + "\n")
+        f.write(r"        &  "
+                r"&  "
+                r"&  "
+                r"&  "
+                r"& $(\mathbb{E^Q}[RV]-\widehat{SW})$ "
+                r"& $(\text{Total error} / \mathbb{E^Q}[RV])$ "
+                r"&  \\" + "\n")
+        f.write(r"        \midrule" + "\n")
 
-    for name, df in model_dfs:
-        print(f"        \\multicolumn{{8}}{{l}}{{\\textbf{{{name}}}}}\\\\")
-        for row in df[cols].itertuples(index=False):
-            # first column with one decimal
-            first = f"{row[0]:.1f}"
-            # for the rest: if |v| < 1e-12, use '-', else format to 4 decimals
-            rest = " & ".join(
-                "-" if abs(v) < 1e-12 else f"{v:.4f}"
-                for v in row[1:]
-            )
-            print(f"        {first} & {rest} \\\\")
-        print(r"        \midrule")
+        for name, df in model_dfs:
+            f.write(f"        \\multicolumn{{8}}{{l}}{{\\textbf{{{name}}}}}\\\\\n")
+            for row in df[cols].itertuples(index=False):
+                first = f"{row[0]:.1f}"
+                rest = " & ".join(
+                    "-" if abs(v) < 1e-12 else f"{v:.4f}"
+                    for v in row[1:]
+                )
+                f.write(f"        {first} & {rest} \\\\\n")
+            f.write(r"        \midrule" + "\n")
 
-    print(r"    \end{tabular}")
-    print(r"    \caption{Numerical illustration of the approximation error for variance swap rates}")
-    print(r"    \label{tab:robustness_analysis_approx-error}")
-    print(r"\end{table}")
-
+        f.write(r"    \end{tabular}" + "\n")
+        f.write(r"    \caption{Numerical illustration of the approximation error for variance swap rates}" + "\n")
+        f.write(r"    \label{tab:robustness_analysis_approx-error}" + "\n")
+        f.write(r"\end{table}" + "\n")
 
 # EOF

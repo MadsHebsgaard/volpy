@@ -1272,7 +1272,7 @@ def return_df(df_big, sgy_list = create_sgy_list(), ticker_list = ["SPX"], extra
     df = df[df["CF_D_30_put_ATM"].isna() == False]
     df = df[df["CF_D_30_call_ATM"].isna() == False]
 
-    col_list = ["date", "r_stock"] + sgy_list + extra_columns
+    col_list = ["ticker", "date", "r_stock"] + sgy_list + extra_columns
     df = df[col_list]
     return df
 
@@ -1377,15 +1377,22 @@ def plot_returns(df, sgy_common, sgy_names, factors):
     plt.legend()
     plt.show()
 
-
-def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strangle_15%", "call_ATM", "put_ATM"], factors=['Mkt', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF', 'VIX'], sign=True, scale=True, plot = False, ticker_list = ["SPX"], extra_columns = []):
+# missing ticker
+def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strangle_15%", "call_ATM", "put_ATM"], factors=['Mkt', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF'], vol_index = True, sign=True, scale=True, plot = False, ticker_list = None, extra_columns = []):
     if sgy_names is None:
         sgy_names = [col.replace(sgy_common, "") for col in df.columns if sgy_common in col]
+
+    if ticker_list == None:
+        ticker_list = list(df["ticker"].unique())
+
 
     sgy_list = create_sgy_list(sgy_common, sgy_names)
 
     df = return_df(df, sgy_list = sgy_list, ticker_list = ticker_list, extra_columns = extra_columns)
-    df = add_factor_df_columns(df, factors)
+
+    if vol_index:   vol_symbols = load_clean_lib.vol_symbols
+    else:           vol_symbols = []
+    df = add_factor_df_columns(df, factors + vol_symbols)
 
     if sign:
         df = scale_columns_to_r_stock_average(df, sgy_list + factors, ref_column="r_stock")
@@ -1821,7 +1828,9 @@ def plot_timeseries_with_pct(df, alpha=0.1, var="days", var_name=None, savefig=F
 
     plt.tight_layout()
 
+    import os
     if savefig:
+        os.makedirs("figures/summary", exist_ok=True)
         plt.savefig(f"figures/summary/rolling average with percentiles ({var}).pdf")
     plt.show()
 
@@ -1872,7 +1881,82 @@ def plot_lowest_number_of_strikes_timeseries(sum_df, savefig = False, figsize = 
 
     plt.tight_layout()
 
+    import os
     if savefig:
+        os.makedirs("figures/summary", exist_ok=True)
         plt.savefig(f"figures/summary/lowest number of strikes timeseries.pdf")
 
     plt.show()
+
+
+def plot_ticker_SW_vs_vix(df, ticker, figsize = (10, 6), show_fig = True, save_fig = False, filename_suffix = ""):
+    vol_symbol = load_clean_lib.ticker_to_vol_symbol(ticker)
+    df_tmp = df[df["ticker"] == ticker].copy()
+    df_tmp = df_tmp[df_tmp[vol_symbol].isna() == False]
+
+    plt.figure(figsize=figsize)
+    plt.plot(df_tmp["date"], df_tmp["SW_0_30"], label=f"SW ({ticker})", alpha=1, lw=0.5)
+    plt.plot(df_tmp["date"], df_tmp[vol_symbol] ** 2, label=rf"{vol_symbol}$^2$", alpha=1, lw=0.5)
+    plt.legend()
+    plt.grid(alpha=0.4)
+    plt.tight_layout()
+
+    import os
+    if save_fig:
+        os.makedirs("figures/vix", exist_ok=True)
+        plt.savefig(f"figures/vix/ticker SW vs vix ({ticker}){filename_suffix}.pdf")
+
+    if show_fig:
+        plt.show()
+    else:
+        plt.close()  # Close figure if not shown
+
+    return
+
+
+def plot_ticker_SW_minus_vix(df, ticker, figsize = (10, 6), show_fig = True, save_fig = False, filename_suffix = ""):
+    vol_symbol = load_clean_lib.ticker_to_vol_symbol(ticker)
+    df_tmp = df[df["ticker"] == ticker].copy()
+    df_tmp = df_tmp[df_tmp[vol_symbol].isna() == False]
+
+    plt.figure(figsize=figsize)
+    plt.plot(df_tmp["date"], df_tmp[vol_symbol] ** 2 - df_tmp["SW_0_30"], label=rf"${vol_symbol}^2 - SW ({ticker})$", alpha=1, lw=0.5)
+    plt.legend()
+    plt.grid(alpha=0.4)
+    plt.tight_layout()
+
+    import os
+    if save_fig:
+        os.makedirs("figures/vix", exist_ok=True)
+        plt.savefig(f"figures/vix/ticker SW - vix ({ticker}){filename_suffix}.pdf")
+
+    if show_fig:
+        plt.show()
+    else:
+        plt.close()  # Close figure if not shown
+
+    return
+
+
+def plot_ticker_SW_minus_vix_scaled(df, ticker, figsize = (10, 6), show_fig = True, save_fig = False, filename_suffix = ""):
+    vol_symbol = load_clean_lib.ticker_to_vol_symbol(ticker)
+    df_tmp = df[df["ticker"] == ticker].copy()
+    df_tmp = df_tmp[df_tmp[vol_symbol].isna() == False]
+
+    plt.figure(figsize=figsize)
+    plt.plot(df_tmp["date"], (df_tmp[vol_symbol] ** 2 - df_tmp["SW_0_30"])/(df_tmp[vol_symbol] ** 2), label=rf"${vol_symbol}^2 - SW ({ticker})$", alpha=1, lw=0.5)
+    plt.legend()
+    plt.grid(alpha=0.4)
+    plt.tight_layout()
+
+    import os
+    if save_fig:
+        os.makedirs("figures/vix", exist_ok=True)
+        plt.savefig(f"figures/vix/ticker SW - vix scaled ({ticker}){filename_suffix}.pdf")
+
+    if show_fig:
+        plt.show()
+    else:
+        plt.close()  # Close figure if not shown
+
+    return

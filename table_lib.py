@@ -1,5 +1,8 @@
 import pandas as pd
 import numpy as np
+import os
+
+from load_clean_lib import etf_to_underlying, ticker_to_vol
 
 
 def CarrWu_tickers():
@@ -451,3 +454,173 @@ def CarrWu2009_table_3_latex(table_df):
         multirow=True
     )
     print(latex_code)
+
+
+import load_clean_lib
+etf_to_underlying = load_clean_lib.etf_to_underlying
+ticker_to_vol = load_clean_lib.ticker_to_vol
+
+def vix_table(df):
+    results = []
+    df = df[df["ticker"] != "TLT"]
+
+    for ticker, vol in ticker_to_vol.items():
+        sw_col = f"SW_0_30"  # Adjust based on actual column names
+        iv_col = vol
+        df_ticker = df[df["ticker"] == ticker].copy()
+        df_ticker[iv_col] = df_ticker[iv_col]**2
+
+        # Filter rows where both SW and IV are present
+        mask = df_ticker[sw_col].notna() & df_ticker[iv_col].notna()
+        df_filtered = df_ticker.loc[mask]
+
+        if df_filtered.empty:
+            continue
+
+        # Compute statistics
+        sw_mean = df_filtered[sw_col].mean()
+        iv_mean = df_filtered[iv_col].mean()
+        epsilon = df_filtered[iv_col] - df_filtered[sw_col]
+        epsilon_mean = epsilon.mean()
+        epsilon_std = epsilon.std()
+        epsilon_over_iv = (epsilon_mean / iv_mean) # Convert to percentage
+        correlation = df_filtered[[sw_col, iv_col]].corr().iloc[0, 1]
+
+        # Get start and end dates
+        start_date = df_filtered['date'].min()
+        end_date = df_filtered['date'].max()
+
+        results.append({
+            'ETF/Index': ticker,
+            'Vol Index': vol,
+            'Underlying': etf_to_underlying[ticker],
+            'start_date': start_date,
+            'end_date': end_date,
+            'SW': sw_mean * 100,
+            'IV': iv_mean * 100,
+            'mean_epsilon': epsilon_mean * 100,
+            'std_epsilon': epsilon_std * 100,
+            'eps_correlation': correlation * 100,
+            'epsilon_over_iv': epsilon_over_iv * 100,
+            'corr_K_eps': np.corrcoef(df_filtered[iv_col], df_filtered["#K"]/epsilon)[0,1] * 100,
+        })
+    results = pd.DataFrame(results)
+
+    # Compute averages for relevant columns
+    avg_row = results[['SW', 'IV', 'mean_epsilon', 'std_epsilon', 'epsilon_over_iv', 'eps_correlation', 'corr_K_eps']].mean()
+    avg_row['ETF/Index'] = 'Average'
+    avg_row['Vol Index'] = ''
+    avg_row['Underlying'] = ''
+    avg_row['start_date'] = np.nan
+    avg_row['end_date'] = np.nan
+    results = pd.concat([results, pd.DataFrame([avg_row])], ignore_index=True)
+
+    return results
+
+
+
+def latex_vix_table(df):
+    # 1) format dates as strings
+    df['start_date'] = df['start_date'].dt.strftime('%Y-%m-%d')
+    df['end_date'] = df['end_date'].dt.strftime('%Y-%m-%d')
+
+    # 2) rename columns to match your header (and inject LaTeX math)
+    results_tex = df.rename(columns={
+        'ETF/Index': 'Ticker',
+        'Vol Index': 'Vol Index',
+        'Underlying': 'Underlying',
+        'start_date': 'Start date',
+        'end_date': 'End date',
+        'SW': 'SW',
+        'IV': r'$\mathrm{IV}^{\mathrm{Cboe}}$',
+        'mean_epsilon': r'mean $\varepsilon$',
+        'epsilon_over_iv': r'mean $\varepsilon^*$',
+        'std_epsilon': r'st. \ $\varepsilon$',
+        'eps_correlation': r'$corr_{\text{SW}}^{\mathrm{IV}^{\mathrm{Cboe}}}$',
+        'corr_K_eps': r'$corr_{\varepsilon^*}^{#K}$',
+    })
+
+    # 3) dump to LaTeX
+    body = results_tex.to_latex(
+        index=False,
+        escape=False,
+        column_format='lllll|lllllll',
+        float_format="%.2f"
+    )
+
+    full_table = "\n".join([
+        r"\begin{table}[ht]",
+        r"  \centering",
+        r"\adjustbox{max width=\textwidth}{",
+        body,
+        r"}",
+        r"  \caption{ETFs/Indices with Cboe-Branded 30-Day Volatility Indices. Numbers are in percent. To save space we note the scaled error as $\varepsilon^* = \displaystyle\frac{\varepsilon}{\mathrm{IV}^{\mathrm{Cboe}}}$.}",
+        r"  \label{tab:Robustness analysis:summary_table_volatility_index_comparison}",
+        r"\end{table}"
+    ])
+
+    # 4) Write to file
+    output_dir = "figures/vix"
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "vix_table.txt")
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(full_table)
+
+
+
+
+def generate_latex_for_pairs(df):
+    """
+    Generate LaTeX code for figure pairs given a DataFrame with a 'ticker' column,
+    and save it to 'figures/vix/vix_figure_latex_code.txt'.
+    """
+    output_dir = "figures/vix"
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "vix_figure_latex_code.txt")
+
+    tickers = list(df["ticker"].unique())
+    pairs = [tickers[i:i + 2] for i in range(0, len(tickers), 2)]
+
+    figs = [
+        {"suffix": " vs vix", "caption": "Level"},
+        {"suffix": " - vix", "caption": r"Difference ($\varepsilon = \text{IV}^{\text{Cboe}} - \text{SW}$)"},
+        {"suffix": " - vix scaled", "caption": r"Scaled difference ($\frac{\varepsilon}{\text{IV}^{\text{Cboe}}} = \frac{\text{IV}^{\text{Cboe}} - \text{SW}}{\text{IV}^{\text{Cboe}}}$)"}
+    ]
+
+    latex = []
+    for t1, t2 in pairs:
+        u1 = etf_to_underlying.get(t1, t1)
+        u2 = etf_to_underlying.get(t2, t2)
+        v1 = ticker_to_vol.get(t1, "")
+        v2 = ticker_to_vol.get(t2, "")
+
+        latex.append(f"\\subsection{{{u1} and {u2}}}")
+        for fig in figs:
+            latex.append("\\begin{figure}[!ht]")
+            latex.append("  \\hspace{0.4cm}")
+            latex.append("  \\makebox[\\textwidth][c]{%")
+            for idx, (t, u, v) in zip(['a', 'b'], [(t1, u1, v1), (t2, u2, v2)]):
+                suffix = fig["suffix"]
+                fname = f"ticker SW{suffix} ({t}).pdf"
+                latex.append(f"    \\begin{{minipage}}[b]{{0.55\\linewidth}}")
+                latex.append("      \\centering")
+                latex.append(
+                    f"      \\includegraphics[width=\\linewidth]{{text/Robustness Analysis/vix figures/{fname}}}")
+                latex.append("      \\captionsetup{skip=0pt}")
+                latex.append(f"      \\caption*{{{idx}) {u} ({t}/{v})}}")
+                latex.append("    \\end{minipage}")
+                if idx == 'a':
+                    latex.append("    \\hfill")
+            latex.append("  }")
+            caption = fig["caption"]
+            label_key = caption.split()[0].lower()
+            latex.append(f"  \\caption{{{caption}}}")
+            latex.append(f"  \\label{{fig:{t1}_{t2}_{label_key}}}")
+            latex.append("\\end{figure}")
+            latex.append("")
+        latex.append("\\clearpage")
+
+    # Write the LaTeX to the file
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(latex))
