@@ -29,6 +29,12 @@ def dirs():
         "s5_full": Option_metrics_path / "s5_full",
         "SPX_full_v2": Option_metrics_path / "SPX_full_v2",
         "vix_markets_full": Option_metrics_path / "vix_markets_full",
+        "vix_assets": Option_metrics_path / "vix_assets",
+        "Liquid_ETFs": Option_metrics_path / "Liquid_ETFs", # combine with distilled OEX to get Liquid
+        "VIX": Option_metrics_path / "VIX", # Final
+        "OEX": Option_metrics_path / "OEX", # Final
+        "Cross-AM": Option_metrics_path / "Cross-AM", # Final
+        # "Liquid": Option_metrics_path / "Liquid", # Final (Liquid = distilled OEX + Liquid_ETFs)
     }
     return dir
 
@@ -124,6 +130,7 @@ def load_clean_and_prepare_od(om_folder, tickers=None, first_day=None, last_day=
     # load data
     print(f"{days_type()} was selected in global_settings.py")
     od, FW, ZCY_curves, returns_and_prices = load_od_FW_ZCY(om_folder, tickers=tickers)
+    returns_and_prices = returns_and_prices[(returns_and_prices["open"] > 0) & (returns_and_prices["close"] > 0)]
 
     if first_day is None:   first_day = od["date"].min()
     if last_day is None:    last_day = od["date"].max()
@@ -157,6 +164,7 @@ def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None,
     # Add low/high and create summary (Filters dataset for criteria such as min 3 strikes ... min 8 days...)
     od, summary_dly_df = vp.od_filter_and_summary_creater(od)
     summary_dly_df.reset_index(inplace=True)
+
 
     # Add risk-free rate of the given date
     RF = download_factor_df(Factor_list=["FF5"])[['date', 'RF']]

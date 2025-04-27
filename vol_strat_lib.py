@@ -31,6 +31,10 @@ def import_orpy_sum(om_folder):
     orpy_df = pd.read_csv(f"{om_folder}/{time_type}df_orpy.csv")
     orpy_df["date"] = pd.to_datetime(orpy_df["date"])
 
+    # Fix for double assets (for some reason the wrong ones have close == 0)
+    sum_df = sum_df[(sum_df["open"] > 0) & (sum_df["close"] > 0)].copy()
+    orpy_df = orpy_df[(orpy_df["open"] > 0) & (orpy_df["close"] > 0)].copy()
+
     return orpy_df, sum_df
 
 

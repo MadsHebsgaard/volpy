@@ -286,7 +286,7 @@ import os
 def main_table(df_merged):
     output_dir = "figures\\Error RA"
     os.makedirs(output_dir, exist_ok=True)  # Ensure the directory exists
-    output_path = os.path.join(output_dir, "main_table.txt")
+    output_path = os.path.join(output_dir, "main_table.tex")
 
     cols = ["ln vt/theta", "v0", "sigma_t^2", "analytic", "SW", "error", "error pct", "error jmp"]
     model_dfs = [
@@ -299,9 +299,11 @@ def main_table(df_merged):
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(r"\begin{table}[ht]" + "\n")
         f.write(r"    \centering" + "\n")
-        f.write(r"    \begin{tabular}{lccccccc}" + "\n")
-        f.write(r"        \toprule" + "\n")
-        f.write(r"        $\ln(v_t/\theta)$ "
+        f.write(r"    \renewcommand{\arraystretch}{1}" + "\n")
+        f.write(r"    \adjustbox{max width=0.75\textwidth}{" + "\n")
+        f.write(r"        \begin{tabular}{lccccccc}" + "\n")
+        f.write(r"            \toprule" + "\n")
+        f.write(r"            $\ln(v_t/\theta)$ "
                 r"& $v_0$ "
                 r"& $\sigma_t^2$ "
                 r"& $\mathbb{E^Q}[RV]$ "
@@ -309,27 +311,28 @@ def main_table(df_merged):
                 r"& Total error "
                 r"& Percentage error "
                 r"& Jump error $(\varepsilon)$ \\[-0.5ex]" + "\n")
-        f.write(r"        &  "
+        f.write(r"            &  "
                 r"&  "
                 r"&  "
                 r"&  "
                 r"& $(\mathbb{E^Q}[RV]-\widehat{SW})$ "
                 r"& $(\text{Total error} / \mathbb{E^Q}[RV])$ "
                 r"&  \\" + "\n")
-        f.write(r"        \midrule" + "\n")
+        f.write(r"            \midrule" + "\n")
 
         for name, df in model_dfs:
-            f.write(f"        \\multicolumn{{8}}{{l}}{{\\textbf{{{name}}}}}\\\\\n")
+            f.write(f"            \\multicolumn{{8}}{{l}}{{\\textbf{{{name}}}}}\\\\\n")
             for row in df[cols].itertuples(index=False):
                 first = f"{row[0]:.1f}"
                 rest = " & ".join(
                     "-" if abs(v) < 1e-12 else f"{v:.4f}"
                     for v in row[1:]
                 )
-                f.write(f"        {first} & {rest} \\\\\n")
-            f.write(r"        \midrule" + "\n")
+                f.write(f"            {first} & {rest} \\\\\n")
+            f.write(r"            \midrule" + "\n")
 
-        f.write(r"    \end{tabular}" + "\n")
+        f.write(r"        \end{tabular}" + "\n")
+        f.write(r"    }" + "\n")
         f.write(r"    \caption{Numerical illustration of the approximation error for variance swap rates}" + "\n")
         f.write(r"    \label{tab:robustness_analysis_approx-error}" + "\n")
         f.write(r"\end{table}" + "\n")

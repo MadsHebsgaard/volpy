@@ -764,6 +764,11 @@ def high_low_swap_rates(summary_dly_df, od_rdy, n_points=200):
     # Use the parallel version to calculate var_swap_rate
     df_swaps = process_od_rdy_parallel(od_rdy, replicate_SW, n_points=n_points)
 
+    min_swap_rate = 1e-6
+    df_swaps.loc[df_swaps["var_swap_rate"] <= min_swap_rate, "var_swap_rate"] = min_swap_rate
+
+
+
     if summary_dly_df.index.names != ["ticker", "date"]:
         summary_dly_df = summary_dly_df.set_index(["ticker", "date"])
         
@@ -1164,6 +1169,8 @@ def load_analyze_create_swap(om_folder="i2s1_full_v2", ticker_list=["SPX", "OEX"
                                                                               last_day=None,
                                                                               IV_type=IV_type,
                                                                               safe_slow_IV = safe_slow_IV)
+    
+    
     # Calculate results such as SW, RV ect.
     summary_dly_df, od_rdy = load_clean_lib.create_summary_dly_df(od, returns_and_prices,
                                                                   first_day=None,
