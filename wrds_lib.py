@@ -381,7 +381,7 @@ def fetch_options_data_multiplefiles(db, begdate, enddate, tickers, output_dir,
                 WHERE o.date BETWEEN '{begdate}' AND '{enddate}'
                 AND o.secid IN {secid_sql}
                 AND (o.exdate - o.date) <= 365
-                AND s.issue_type IN ('0')
+                AND NOT s.issue_type = ''
                 AND s.exchange_d <> 0
                 LIMIT {chunk_size} OFFSET {offset}
             """ 
