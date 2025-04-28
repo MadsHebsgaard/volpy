@@ -2167,6 +2167,7 @@ OEX_tickers = ["OEX", "OEF", "AA", "AAPL", "ABBV", "ABT", "ACN", "ADBE", "AEP", 
 Cross_AM_tickers =  ["SPX", "VGK", "FXI", "EWJ", "EWZ", "INDA", "EZA", "EWC",     "EWU", "EWY", "EWA", "EWW", "VNQ", "TLT", "SHY", "TIP", "LQD", "HYG", "EMB", "IAU", "SLV", "UNG", "USO", "UVXY", "UUP", "FXE", "FXY", "CEW", "BITO" ]
 VIX_tickers = ["SPX", "GOOGL", "AMZN", "DIA", "IWM", "QQQ", "AAPL", "EWZ", "USO", "GS", "EEM", "FXE", "SLV", "IBM", "TLT"]
 ALL_tickers = get_unique_tickers([OEX_tickers, Cross_AM_tickers, VIX_tickers])
+ALL_ex_VIX_tickers = list(set(ALL_tickers) - set(VIX_tickers))
 Liquid_tickers = []
 
 
