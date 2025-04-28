@@ -5,6 +5,8 @@ import numpy as np
 import load_clean_lib
 from global_settings import *
 
+
+
 def import_sum_raw(om_folder):
     om_folder = load_clean_lib.volpy_output_dir(om_folder)
     time_type = days_type()
@@ -18,13 +20,22 @@ def import_sum_raw(om_folder):
     return sum_df, od_raw
 
 
-def import_sum(om_folder):
+def import_orpy_sum(om_folder):
     om_folder = load_clean_lib.volpy_output_dir(om_folder)
     time_type = days_type()
     sum_df = pd.read_csv(f"{om_folder}/{time_type}summary_dly.csv")
     sum_df["date"] = pd.to_datetime(sum_df["date"])
     sum_df[f"return_next"] = sum_df[f"return"].shift(-1)
-    return sum_df
+
+
+    orpy_df = pd.read_csv(f"{om_folder}/{time_type}df_orpy.csv")
+    orpy_df["date"] = pd.to_datetime(orpy_df["date"])
+
+    # Fix for double assets (for some reason the wrong ones have close == 0)
+    sum_df = sum_df[(sum_df["open"] > 0) & (sum_df["close"] > 0)].copy()
+    orpy_df = orpy_df[(orpy_df["open"] > 0) & (orpy_df["close"] > 0)].copy()
+
+    return orpy_df, sum_df
 
 
 def create_od_hl(od_raw, sum_df, price_type, IV_type):
