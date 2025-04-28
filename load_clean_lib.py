@@ -19,6 +19,8 @@ def dirs():
         Option_metrics_path = Path(r"D:\Finance Data\OptionMetrics")
     elif profile == "Axel":
         Option_metrics_path = Path(r"C:\Users\axell\Desktop\CBS\data\OptionMetrics")
+    elif profile == "Mads_Laptop":
+        Option_metrics_path = Path(r"C:\Users\hebsg\Data\OptionMetrics")
 
     dir = {
         "OptionMetrics": Option_metrics_path,
@@ -44,6 +46,8 @@ def Option_metrics_path_from_profile():
         return Path(r"D:\Finance Data\OptionMetrics")
     elif profile == "Axel":
         return Path(r"C:\Users\axell\Desktop\CBS\data\OptionMetrics")
+    elif profile == "Mads_Laptop":
+        return Path(r"C:\Users\hebsg\Data\OptionMetrics")
     else:
         print("choose viable profile such as 'Axel' or 'Mads' in global settings")
     return
