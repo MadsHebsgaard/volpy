@@ -6,6 +6,7 @@ import sys
 import time
 from itertools import islice
 import load_clean_lib
+import re
 
 # from global_settings import days_type
 import importlib
@@ -98,6 +99,92 @@ def load_option_data(file_path):
     # df["TTM_trd"] = (df["n_trading_day_exdate"] - df["n_trading_day"]) / round(average_trading_days_per_year)
 
     return df
+
+
+
+def clean_option_data_chunks(od_i_file, file_path):
+    import os
+
+    columns_to_load = [
+        "ticker",
+        "optionid",
+        "date",
+        "exdate",
+        "cp_flag",
+        "strike_price",
+        "best_bid",
+        "best_offer",
+        "volume",
+        "impl_volatility",
+        # "delta",
+        # "index_flag",
+        # "forward_price",
+        # "exercise_style",
+        # "secid"
+    ]
+
+    # Load only the specified columns
+    df = pd.read_csv(od_i_file, usecols=columns_to_load)
+
+    df.rename(columns={"strike_price": "K"}, inplace=True)
+    df.rename(columns={"best_bid": "bid"}, inplace=True)
+    df.rename(columns={"best_offer": "ask"}, inplace=True)
+    df.rename(columns={"impl_volatility": "IV_om"}, inplace=True)
+    df['mid'] = (df['bid'] + df['ask'])/2
+
+    # Format columns
+    df['date'] = pd.to_datetime(df['date'], format='%Y-%m-%d', errors='coerce')
+    df['exdate'] = pd.to_datetime(df['exdate'], format='%Y-%m-%d', errors='coerce')
+    df['cp_flag'] = df['cp_flag'].astype('string')
+    df['ticker'] = df['ticker'].astype('string')
+    df['optionid'] = df['optionid'].astype(int)
+
+    # df['exercise_style'] = df['exercise_style'].astype('string')
+    df['K'] /= 1000
+
+    # load valid dates
+    unique_calendar_days = df["date"].drop_duplicates().sort_values()  # [df["ticker"] == "SPX"]
+    valid_dates_path = os.path.join(file_path, "dates.csv")
+    valid_dates = pd.read_csv(valid_dates_path, usecols=["DATE"], parse_dates=["DATE"])
+    valid_dates.rename(columns={"DATE": "date"}, inplace=True)
+    valid_dates = valid_dates[valid_dates["date"] >= unique_calendar_days.iloc[0]]
+    valid_dates = valid_dates["date"]
+
+    # Create a mapping of date to trading day number
+    trading_day_map = {date: n for n, date in enumerate(valid_dates)}
+    dates = valid_dates.values.astype("datetime64[ns]")
+    exdates = df["exdate"].values.astype("datetime64[ns]")
+    indices = np.searchsorted(dates, exdates, side="right") - 1
+    indices = np.where(indices < 0, np.nan, indices)
+
+    total_trading_days = unique_calendar_days.nunique()
+    total_calendar_days = (unique_calendar_days.max() - unique_calendar_days.min()).days + 1
+
+    average_calendar_days_per_year = 365
+    cal_years_total = total_calendar_days / average_calendar_days_per_year
+    average_trading_days_per_year = total_trading_days / cal_years_total
+    # print("average_trading_days_per_year", average_trading_days_per_year)
+
+    # Add the n_trading_day column to the DataFrame
+    df["n_trading_day"] = df["date"].map(trading_day_map)
+    df["n_trading_day_exdate"] = indices
+
+    # df["n_trading_day_exdate"] = df["exdate"].apply(get_trading_day)
+    df["t_days"] = df["n_trading_day_exdate"] - df["n_trading_day"]
+    df["t_TTM"] = df["t_days"] / average_trading_days_per_year #todo: do this on yearly basis to fix if average trading days change throughout years
+
+    # Calendar (_cal)
+    df["c_days"] = (df["exdate"] - df["date"]).dt.days
+    df["c_TTM"] = df["c_days"] / average_calendar_days_per_year
+
+    df = df.sort_values(by="date")
+
+    # Trading (_trd)
+    # df["TTM_trd"] = (df["n_trading_day_exdate"] - df["n_trading_day"]) / round(average_trading_days_per_year)
+
+    return df
+
+
 
 
 # def load_implied_volatility(file_path):
@@ -243,7 +330,7 @@ def calc_realized_var(returns_and_prices, first_day, last_day):
         T = 21  # Trading days: brug altid de næste 21 observationer
 
     # Filter data for perioden fra first_day til last_day + 30 dage (skal være bredt nok til at dække T observationer)
-    last_day_ret = last_day + pd.Timedelta(days=30)
+    last_day_ret = last_day + pd.Timedelta(days=60)
     returns_and_prices = returns_and_prices[
         (returns_and_prices['date'] >= first_day) & (returns_and_prices['date'] <= last_day_ret)
     ].copy()
@@ -791,52 +878,89 @@ def high_low_swap_rates(summary_dly_df, od_rdy, n_points=200):
 
     return summary_dly_df
 
-def interpolate_swaps_and_returns(summary_dly_df):
+# def interpolate_swaps_and_returns(summary_dly_df):
 
+#     if days_type() == "c_":
+#         T = 30
+#     elif days_type() == "t_":
+#         T = 21
+
+#     # T = 30
+#     t = 0
+#     T1 = summary_dly_df["low days"]
+#     T2 = summary_dly_df["high days"]
+#     SW1 = summary_dly_df["low SW"]
+#     SW2 = summary_dly_df["high SW"]
+#     RF = summary_dly_df["RF"]
+
+#     # summary_dly_df["SW_0_30"] = (1 / (T - t)) * (SW1 * (T1 - t) * (T2 - T) + SW2 * (T2 - t) * (T - T1)) / (T2 - T1)
+#     theta = (T - T1) / (T2 - T1)
+#     summary_dly_df["SW_0_30"] = SW1 * (1-theta) + SW2 * theta
+
+#     summary_dly_df["SW_m30_0"] = summary_dly_df.groupby("ticker")["SW_0_30"].shift(30)
+#     summary_dly_df["RV_m30_0"] = summary_dly_df.groupby("ticker")["RV"].shift(30)
+#     summary_dly_df["SW_month"] = summary_dly_df["RV_m30_0"] - summary_dly_df['SW_m30_0']
+
+#     summary_dly_df['SW_month_ln_ret'] = np.log(np.maximum(summary_dly_df["RV_m30_0"], 0.001) / np.maximum(summary_dly_df['SW_m30_0'], 0.001))
+#     summary_dly_df["SW_month_ln_ret_RF"] = np.log(np.maximum(summary_dly_df["RV_m30_0"], 0.001) / np.maximum((1 + RF) * summary_dly_df['SW_m30_0'], 0.001))
+
+
+#     summary_dly_df["SW_m1_29"] = summary_dly_df.groupby("ticker")["SW_0_30"].shift(1)
+#     # summary_dly_df["SW_0_29"] = (1 / (T - t)) * (SW1 * (T1 - t) * (T2 - T) + SW2 * (T2 - t) * (T - T1)) / (T2 - T1)
+
+#     theta = ((T-1) - T1) / (T2 - T1)
+#     summary_dly_df["SW_0_29"] = SW1 * (1-theta) + SW2 * theta
+#     # summary_dly_df["SW_1_30"] = summary_dly_df.groupby("ticker")["SW_0_29"].shift(-1)
+
+#     summary_dly_df["SW_sell"] = (1/T) * 252 * summary_dly_df["squared_return"] + (T-1)/T * summary_dly_df["SW_0_29"] #todo: change 252 for the actual true average trading days a year
+#     summary_dly_df["SW_buy"] = summary_dly_df["SW_m1_29"]
+
+#     summary_dly_df["CF_30_SW_day"] = summary_dly_df["SW_sell"] - summary_dly_df["SW_buy"]
+#     summary_dly_df["r_30_SW_day"] = summary_dly_df["CF_30_SW_day"] / summary_dly_df["SW_buy"].shift(1).rolling(window=21).mean()
+
+#     # summary_dly_df['SW_day_RF'] = sell_price - (1 + RF) * buy_price
+#     # summary_dly_df['SW_day_ln_ret'] = np.log(np.maximum(sell_price, 0.001) / np.maximum(buy_price, 0.001))
+#     # summary_dly_df["SW_day_ln_ret_RF"] = np.log(np.maximum(sell_price, 0.001) / np.maximum((1 + RF) * buy_price, 0.001))
+#     # summary_dly_df["SW_return_day_scaled"] = summary_dly_df["SW_return_day"] / summary_dly_df["SW_m1_29"]
+
+#     return summary_dly_df
+
+
+def interpolate_swaps_and_returns(summary_dly_df):
     if days_type() == "c_":
         T = 30
     elif days_type() == "t_":
         T = 21
 
-    # T = 30
-    t = 0
+    #interpolation
     T1 = summary_dly_df["low days"]
     T2 = summary_dly_df["high days"]
     SW1 = summary_dly_df["low SW"]
     SW2 = summary_dly_df["high SW"]
-    RF = summary_dly_df["RF"]
 
-    # summary_dly_df["SW_0_30"] = (1 / (T - t)) * (SW1 * (T1 - t) * (T2 - T) + SW2 * (T2 - t) * (T - T1)) / (T2 - T1)
-    theta = (T - T1) / (T2 - T1)
-    summary_dly_df["SW_0_30"] = SW1 * (1-theta) + SW2 * theta
+    theta_30 = (T - T1) / (T2 - T1)
+    summary_dly_df["SW_0_30"] = SW1 * (1 - theta_30) + SW2 * theta_30
 
-    summary_dly_df["SW_m30_0"] = summary_dly_df.groupby("ticker")["SW_0_30"].shift(30)
-    summary_dly_df["RV_m30_0"] = summary_dly_df.groupby("ticker")["RV"].shift(30)
-    summary_dly_df["SW_month"] = summary_dly_df["RV_m30_0"] - summary_dly_df['SW_m30_0']
+    theta_29 = ((T - 1) - T1) / (T2 - T1)
+    summary_dly_df["SW_0_29"] = SW1 * (1 - theta_29) + SW2 * theta_29
 
-    summary_dly_df['SW_month_ln_ret'] = np.log(np.maximum(summary_dly_df["RV_m30_0"], 0.001) / np.maximum(summary_dly_df['SW_m30_0'], 0.001))
-    summary_dly_df["SW_month_ln_ret_RF"] = np.log(np.maximum(summary_dly_df["RV_m30_0"], 0.001) / np.maximum((1 + RF) * summary_dly_df['SW_m30_0'], 0.001))
-
-
+    #Shifted values
     summary_dly_df["SW_m1_29"] = summary_dly_df.groupby("ticker")["SW_0_30"].shift(1)
-    # summary_dly_df["SW_0_29"] = (1 / (T - t)) * (SW1 * (T1 - t) * (T2 - T) + SW2 * (T2 - t) * (T - T1)) / (T2 - T1)
 
-    theta = ((T-1) - T1) / (T2 - T1)
-    summary_dly_df["SW_0_29"] = SW1 * (1-theta) + SW2 * theta
-    # summary_dly_df["SW_1_30"] = summary_dly_df.groupby("ticker")["SW_0_29"].shift(-1)
+    #discount factor
+    summary_dly_df["discount_factor_30d"] = 1 / (1 + summary_dly_df["RF"])**20
 
-    summary_dly_df["SW_sell"] = (1/T) * 252 * summary_dly_df["squared_return"] + (T-1)/T * summary_dly_df["SW_0_29"] #todo: change 252 for the actual true average trading days a year
-    summary_dly_df["SW_buy"] = summary_dly_df["SW_m1_29"]
+    # Casflow version baseret på markedsværdi af en daglig (-short) swap = long
+    summary_dly_df["CF_30_SW_day"] = - (
+        summary_dly_df["SW_m1_29"]  # fast ben er det samme 
+        - summary_dly_df["SW_0_29"] * (T - 1) / T  # ny "rest" variabelt ben
+        - summary_dly_df["squared_return"] * 252 * 1 / T  # realiseret variabllt ben
+    )  * summary_dly_df["discount_factor_30d"]  # diskonteres
 
-    summary_dly_df["CF_30_SW_day"] = summary_dly_df["SW_sell"] - summary_dly_df["SW_buy"]
-    summary_dly_df["r_30_SW_day"] = summary_dly_df["CF_30_SW_day"] / summary_dly_df["SW_buy"].shift(1).rolling(window=21).mean()
-
-    # summary_dly_df['SW_day_RF'] = sell_price - (1 + RF) * buy_price
-    # summary_dly_df['SW_day_ln_ret'] = np.log(np.maximum(sell_price, 0.001) / np.maximum(buy_price, 0.001))
-    # summary_dly_df["SW_day_ln_ret_RF"] = np.log(np.maximum(sell_price, 0.001) / np.maximum((1 + RF) * buy_price, 0.001))
-    # summary_dly_df["SW_return_day_scaled"] = summary_dly_df["SW_return_day"] / summary_dly_df["SW_m1_29"]
+    summary_dly_df["r_30_SW_day"] = summary_dly_df["CF_30_SW_day"] / summary_dly_df["SW_m1_29"].shift(1).rolling(window=21).mean()
 
     return summary_dly_df
+
 
 
 def add_realized_vol_to_summary(summary_dly_df, real_vol):
@@ -1180,7 +1304,72 @@ def load_analyze_create_swap(om_folder="i2s1_full_v2", ticker_list=["SPX", "OEX"
         od_raw.to_csv(f"{output_dir}/{time_type}od_raw.csv", index=False)
         # od_rdy.to_csv(f"{output_dir}/{time_type}od_rdy.csv", index=False)
 
-    return summary_dly_df, od_raw
+    return summary_dly_df, od
+
+
+
+
+def load_analyze_create_swap_chunks(om_folder="i2s1_full_v2", ticker_list=["SPX", "OEX"], first_day=None, last_day=None,
+                             IV_type="om", save_files = True, safe_slow_IV = False):
+    
+    om_dir = load_clean_lib.Option_metrics_path_from_profile()
+    dir = om_dir / om_folder
+    option_data_folder = dir / "option data"
+    load_clean_lib.volpy_output_dir(om_folder).mkdir(parents=True, exist_ok=True)
+    files = sorted(option_data_folder.glob("*.csv"))
+
+    # Load metadata kun én gang
+    FW, ZCY_curves, returns_and_prices = load_clean_lib.load_option_metadata(
+        om_folder=om_folder, tickers=ticker_list
+    )
+
+    all_summaries = []   # <-- her samler vi alle chunks
+    for file in files:
+        # Load & clean
+        od, od_raw = load_clean_lib.load_clean_and_prepare_od_chunks(
+            od_i_file=file,
+            om_folder=om_folder,
+            FW=FW,
+            ZCY_curves=ZCY_curves,
+            tickers=ticker_list,
+            first_day=None,
+            last_day=None,
+            IV_type=IV_type,
+            safe_slow_IV=safe_slow_IV
+        )
+
+        # Summary
+        summary_dly_df, od_rdy = load_clean_lib.create_summary_dly_df(
+            od, returns_and_prices,
+            first_day=None,
+            last_day=None,
+            n_grid=2000
+        )
+
+        summary_dly_df = interpolate_swaps_and_returns(summary_dly_df).reset_index()
+
+        # Gem per-chunk
+        if save_files:
+            output_dir = load_clean_lib.volpy_output_dir(om_folder)
+            time_type = days_type()
+            stem = file.stem
+            m = re.search(r'(\d{4}(?:-\d{2})?)$', stem)
+            stamp = m.group(1) if m else stem
+            od_raw.to_csv(f"{output_dir}/{time_type}od_raw_{stamp}.csv", index=False)
+            od_rdy.to_csv(f"{output_dir}/{time_type}od_rdy_{stamp}.csv", index=False)
+
+        # Append til liste
+        all_summaries.append(summary_dly_df)
+
+    # Efter løkken: sæt det hele sammen og returnér kun summary
+    if all_summaries:
+        full_summary = pd.concat(all_summaries).sort_values("date").reset_index(drop=True)
+    else:
+        full_summary = pd.DataFrame()
+
+    full_summary.to_csv(f"{output_dir}//{time_type}summary_dly.csv", index=False)
+
+    return full_summary
 
 
 

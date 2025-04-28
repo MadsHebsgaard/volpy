@@ -6,7 +6,7 @@ def days_type():
     t: trading days
     c: calendar days
     '''
-    type = 'c' #choose between 't' and 'c'
+    type = 't' #choose between 't' and 'c'
     return type + '_' # todo: move '_' to the functions that call this one
 
 def clean_t_days():

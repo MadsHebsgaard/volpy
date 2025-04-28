@@ -200,7 +200,6 @@ def create_option_sgys(sum_df, od_raw, price_type="mid", IV_type="om", OTMs=[0.0
     # add strategies
     HL30_list = ["30"]  # ["low", "high", "30"], ["30"] # here 30 represents 21
 
-
     df_orpy = sum_df.copy()
     df_orpy = orpy.prepare_for_sgys(df_orpy, OTMs)
 
@@ -219,3 +218,96 @@ def create_option_sgys(sum_df, od_raw, price_type="mid", IV_type="om", OTMs=[0.0
             sum_df.to_csv(f"{output_dir}/{time_type}sum_df_big.csv")
 
     return sum_df, df_orpy
+
+
+import re
+from tqdm import tqdm
+
+
+def add_IVs_to_sum_df(sum_df, od_hl, IV_type="om"):
+    iv_colname = f"IV_{IV_type}"
+
+    # Brugte optionid-kolonner (du har bekræftet navne tidligere)
+    used_optionid_cols = [
+        "low_call_ATM_optionid",
+        "high_call_ATM_optionid",
+        "low_put_ATM_optionid",
+        "high_put_ATM_optionid"
+    ]
+
+    # Lav en lookup dictionary én gang
+    iv_lookup_dict = od_hl.set_index("optionid")[iv_colname].to_dict()
+
+    # Brug map til hver kolonne (ingen merge = hurtigt og memory-sikkert)
+    for col in used_optionid_cols:
+        new_iv_col = col.replace("optionid", "IV")
+        sum_df[new_iv_col] = sum_df[col].map(iv_lookup_dict)
+
+    return sum_df
+
+
+
+
+
+def create_option_sgys_from_chunks(sum_df, om_folder, price_type="mid", IV_type="om", OTMs=[0.05, 0.15], save_files_each_chunk=True, save_files=True):
+    import option_returns as orpy
+
+    output_dir = load_clean_lib.volpy_output_dir(om_folder)
+    time_type = days_type()
+
+    # Find alle od_raw chunk-filer (fx od_raw_1996.csv, ...)
+    od_files = sorted(output_dir.glob(f"{time_type}od_raw_*.csv"))
+
+    all_sgy_df = []
+    all_sum_df_chunks = []  # <-- til opdateret sum_df
+
+    # Progress bar med tqdm
+    for od_file in tqdm(od_files, desc="Processing option chunks", unit="file"):
+        od_raw = pd.read_csv(od_file, parse_dates=["date", "exdate"])
+
+        # STEP 1: Create od_hl
+        od_hl = create_od_hl(od_raw=od_raw, sum_df=sum_df, price_type=price_type, IV_type=IV_type)
+
+        # Filtrér kun de datoer som er i den pågældende od_raw chunk
+        dates_in_chunk = od_raw["date"].unique()
+        sum_df_chunk = sum_df[sum_df["date"].isin(dates_in_chunk)].copy()
+        sum_df_chunk = add_F_to_sum_df(od_hl=od_hl, sum_df=sum_df_chunk)        
+        sum_df_chunk = add_ATM_options_to_sum_df(sum_df=sum_df_chunk, od_hl=od_hl, od_raw=od_raw, OTMs=OTMs)
+
+        # STEP 3: Forbered og tilføj strategier
+        df_orpy = orpy.prepare_for_sgys(sum_df_chunk.copy(), OTMs)
+        HL30_list = ["30"]
+        for add_sgy in [
+            orpy.add_put_and_call_sgy,
+            orpy.add_straddle_strangle_sgy # ,
+            # orpy.add_butterfly_spread_sgy,
+            # orpy.add_condor_strangle_sgy,
+            # orpy.add_stacked_straddle_sgy,
+            # orpy.add_full_stacked_straddle_sgy,
+            # orpy.add_full_stacked_strangle_sgy
+        ]:
+            df_orpy = add_sgy(df_orpy, OTMs, HL30_list)
+
+        
+        # this is the correlation strategy
+        sum_df_chunk = add_IVs_to_sum_df(sum_df_chunk, od_hl, IV_type=IV_type)
+
+
+        # Gem og tilføj
+        if save_files_each_chunk:
+            stem = od_file.stem
+            stamp = re.search(r'(\d{4}(?:-\d{2})?)$', stem).group(1)
+            df_orpy.to_csv(f"{output_dir}/{time_type}df_orpy_{stamp}.csv", index=False)
+
+        all_sgy_df.append(df_orpy)
+        all_sum_df_chunks.append(sum_df_chunk)
+
+    # Merge updated sum_df chunks (for alle datoer)
+    sum_df_all = pd.concat(all_sum_df_chunks).drop_duplicates(subset=["ticker", "date"]).sort_values("date").reset_index(drop=True)
+    df_orpy_all = pd.concat(all_sgy_df).sort_values("date").reset_index(drop=True)
+
+    if save_files: df_orpy_all.to_csv(f"{output_dir}/{time_type}df_orpy.csv", index=False)
+
+    return sum_df_all, df_orpy_all
+
+

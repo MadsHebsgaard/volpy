@@ -73,6 +73,53 @@ def load_od_FW_ZCY(om_folder="i4s4", tickers=None):
     return od, FW, ZCY_curves, ret
 
 
+def load_od_FW_ZCY_chunks(od_i_file, om_folder="i4s4", tickers=None):
+    """Loader optionsdata, forward priser, returns og yield curves."""
+    om_dir = Option_metrics_path_from_profile()
+    dir = om_dir / om_folder
+
+    if not dir.is_dir():
+        print("The specified OptionMetrics folder 'om_folder' does not exist, add the folder to OptionMetrics directorary")
+
+    volpy_output_dir(om_folder).mkdir(parents=True, exist_ok=True)
+
+    # Load hver dataset direkte
+    od = vp.clean_option_data_chunks(od_i_file, om_dir) #vp.load_option_data_chunks(od_i = od_i)
+    # FW = vp.load_forward_price(dir / "forward price.csv")
+    # ret = vp.load_returns_and_price(dir / "returns and stock price.csv")
+    # ZCY_curves = vp.load_ZC_yield_curve(dir / "ZC yield curve.csv")
+
+    # Filtrér på tickers, hvis angivet
+    if tickers:
+        od = od[od["ticker"].isin(tickers)]
+        # FW = FW[FW["ticker"].isin(tickers)]
+        # ret = ret[ret["ticker"].isin(tickers)]
+
+    return od
+
+
+def load_option_metadata(om_folder="i4s4", tickers=None):
+
+    om_dir = Option_metrics_path_from_profile()
+    base = om_dir / om_folder
+    if not base.is_dir():
+        raise FileNotFoundError(f"OptionMetrics-mappen '{om_folder}' findes ikke under {om_dir}")
+
+    # 1) Load metadata
+    FW = vp.load_forward_price(base / "forward price.csv")
+    ret = vp.load_returns_and_price(base / "returns and stock price.csv")
+    ZCY = vp.load_ZC_yield_curve(base / "ZC yield curve.csv")
+
+    # 2) Filtrér på tickers hvis ønsket
+    if tickers:
+        FW = FW[FW["ticker"].isin(tickers)]
+        ret = ret[ret["ticker"].isin(tickers)]
+        # (ZCY er typisk ikke ticker-specific, så vi lader den være)
+
+    return FW, ZCY, ret
+
+
+
 def clean_od(od, first_day = pd.to_datetime("1996-01-04"), last_day = pd.to_datetime("2003-02-28")):
 
     days_var = days_type() + "days"
@@ -148,6 +195,36 @@ def load_clean_and_prepare_od(om_folder, tickers=None, first_day=None, last_day=
     print("Data loaded")
 
     return od, returns_and_prices, od_raw
+
+
+def load_clean_and_prepare_od_chunks(od_i_file, om_folder, FW, ZCY_curves, tickers=None, first_day=None, last_day=None, IV_type = "od", safe_slow_IV = False):
+    # load data (is loaded)    
+    print(f"{days_type()} was selected in global_settings.py")
+    od = load_od_FW_ZCY_chunks(od_i_file, om_folder, tickers=tickers)
+
+    if first_day is None:   first_day = od["date"].min()
+    if last_day is None:    last_day = od["date"].max()
+
+    # add forward (before cleaning such that od_raw has the forward rate, used in options trats for ATM options that might be slightly ITM)
+    od = vp.add_FW_to_od(od, FW)
+
+    # add IV to options (bid/ask/mid/om)
+    od["IV"] = vp.add_bid_mid_ask_IV(od, IV_type, safe_slow_IV = safe_slow_IV)
+    od[f"IV_{IV_type}"] = od["IV"]
+
+    od_raw = od
+
+    # clean data (should be looked upon)
+    od = clean_od(od, first_day=first_day, last_day=last_day)
+    # remove if ITM
+    od = od.loc[((od["F"] < od["K"]) & (od["cp_flag"] == "C")) | ((od["F"] > od["K"]) & (od["cp_flag"] == "P"))]
+    # print(od.shape, "sdsfd")
+
+    # add r to options
+    od = vp.add_r_to_od_parallel(od, ZCY_curves)
+    print("Data loaded")
+
+    return od, od_raw
 
 
 def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None, n_grid=200):

@@ -232,6 +232,199 @@ def fetch_options_data_progress(db, begdate, enddate, tickers, csv_path, chunk_s
     return
 
 
+# def fetch_options_data_multiplefiles(db, begdate, enddate, tickers, output_dir,
+#                                      data_frq="Y", return_df=False):
+#     """
+#     Hent optionsdata for hvert år separat og gem månedlige eller årlige filer
+#     uden at akkumulere hele datasættet i hukommelsen.
+#     """
+#     import pandas as pd
+#     from pathlib import Path
+
+#     output_dir = Path(output_dir)
+#     output_dir.mkdir(parents=True, exist_ok=True)
+
+#     # Forbered ticker-liste til SQL
+#     if isinstance(tickers, str):
+#         tickers = [tickers]
+#     tickers_sql = ", ".join(f"'{t}'" for t in tickers)
+
+#     # Hent SECIDs
+#     secid_df = db.raw_sql(f"""
+#         SELECT secid
+#         FROM optionm.securd1
+#         WHERE ticker IN ({tickers_sql})
+#     """)
+#     secids = secid_df["secid"].tolist()
+#     secid_sql = f"({','.join(map(str, secids))})" if secids else "(NULL)"
+
+#     # Definer start- og slutår baseret på begdate og enddate
+#     start_year = max(int(begdate[:4]), 1996)
+#     end_year = min(int(enddate[:4]) + 1, 2024)
+
+#     all_years = [] if return_df else None
+
+#     # Brug tqdm over år‐intervallet
+#     for year in tqdm(range(start_year, end_year), desc="Collecting data", unit="years"):
+#         # Hent data for dette år
+#         sql = f"""
+#             SELECT o.secid, s.ticker, o.optionid,
+#                 o.date, o.exdate, o.cp_flag, o.strike_price,
+#                 o.best_bid, o.best_offer, o.impl_volatility,
+#                 o.volume, o.open_interest
+#             FROM optionm.opprcd{year} o
+#             JOIN optionm.securd1 s ON o.secid = s.secid
+#             WHERE o.date BETWEEN '{begdate}' AND '{enddate}'
+#             AND o.secid IN {secid_sql}
+#             AND (o.exdate - o.date) <= 365
+#         """
+#         df_year = db.raw_sql(sql, date_cols=["date", "exdate"])
+#         if df_year.empty:
+#             continue
+
+#         # Split og gem pr. periode (måned eller år)
+#         df_year["date"] = pd.to_datetime(df_year["date"])
+#         df_year["period"] = df_year["date"].dt.to_period(data_frq).astype(str)
+
+#         for period, grp in df_year.groupby("period"):
+#             fn = output_dir / f"option data {period}.csv"
+#             grp.to_csv(fn, index=False)
+
+#         if return_df:
+#             all_years.append(df_year)
+
+#         # frigør hukommelse før næste år
+#         del df_year
+
+#     if return_df:
+#         return pd.concat(all_years, ignore_index=True)
+#     return None
+
+
+
+
+def fetch_options_data_multiplefiles(db, begdate, enddate, tickers, output_dir,
+                                     data_frq="Y", return_df=False, chunk_size=100_000):
+    """
+    Hent optionsdata for hvert år separat og gem månedlige eller årlige filer
+    uden at akkumulere hele datasættet i hukommelsen. Nu med chunking for store år.
+    """
+    import pandas as pd
+    from pathlib import Path
+    from tqdm import tqdm
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Forbered ticker-liste til SQL
+    if isinstance(tickers, str):
+        tickers = [tickers]
+    tickers_sql = ", ".join(f"'{t}'" for t in tickers)
+
+    # Hent SECIDs
+    secid_df = db.raw_sql(f"""
+        SELECT secid
+        FROM optionm.securd1
+        WHERE ticker IN ({tickers_sql})
+    """)
+    secids = secid_df["secid"].tolist()
+    secid_sql = f"({','.join(map(str, secids))})" if secids else "(NULL)"
+
+    # Definer start- og slutår baseret på begdate og enddate
+    start_year = max(int(begdate[:4]), 1996)
+    end_year = min(int(enddate[:4]) + 1, 2024)
+
+    all_years = [] if return_df else None
+
+    # Brug tqdm over år‐intervallet
+    for year in tqdm(range(start_year, end_year), desc="Collecting data", unit="years"):
+        offset = 0
+        first_chunk = True
+        df_year_chunks = []  # midlertidig liste til at samle chunks hvis return_df = True
+
+        while True:
+            # Hent data i chunks
+            # sql_chunk = f"""
+            #     SELECT o.secid, s.ticker, o.optionid,
+            #         o.date, o.exdate, o.cp_flag, o.strike_price,
+            #         o.best_bid, o.best_offer, o.impl_volatility,
+            #         o.volume, o.open_interest
+            #     FROM optionm.opprcd{year} o
+            #     JOIN optionm.securd1 s ON o.secid = s.secid
+            #     WHERE o.date BETWEEN '{begdate}' AND '{enddate}'
+            #     AND o.secid IN {secid_sql}
+            #     AND (o.exdate - o.date) <= 365
+            #     LIMIT {chunk_size} OFFSET {offset}
+            # """
+            # sql_chunk = f"""
+            #     SELECT o.secid, s.ticker, o.optionid,
+            #         o.date, o.exdate, o.cp_flag, o.strike_price,
+            #         o.best_bid, o.best_offer, o.impl_volatility,
+            #         o.volume, o.open_interest
+            #     FROM optionm.opprcd{year} o
+            #     JOIN optionm.securd1 s ON o.secid = s.secid
+            #     WHERE o.date BETWEEN '{begdate}' AND '{enddate}'
+            #     AND o.secid IN {secid_sql}
+            #     AND (o.exdate - o.date) <= 365
+            #     AND NOT ( (s.issue_type IS NULL OR s.issue_type IN ('', '0')) 
+            #                 AND s.exchange_d = 0 )
+            #     LIMIT {chunk_size} OFFSET {offset}
+            # """
+
+            sql_chunk = f"""
+                SELECT o.secid, s.ticker, o.optionid,
+                    o.date, o.exdate, o.cp_flag, o.strike_price,
+                    o.best_bid, o.best_offer, o.impl_volatility,
+                    o.volume, o.open_interest, s.issue_type, s.exchange_d
+                FROM optionm.opprcd{year} o
+                JOIN optionm.securd1 s ON o.secid = s.secid
+                WHERE o.date BETWEEN '{begdate}' AND '{enddate}'
+                AND o.secid IN {secid_sql}
+                AND (o.exdate - o.date) <= 365
+                AND s.issue_type IN ('0')
+                AND s.exchange_d <> 0
+                LIMIT {chunk_size} OFFSET {offset}
+            """ 
+         
+            # AND (
+            #     s.issue_type IN ('0', 'A', '7', 'F', 'S', 'U')
+            #     OR s.issue_type = '%'
+            # )
+
+            chunk = db.raw_sql(sql_chunk, date_cols=["date", "exdate"])
+
+            if chunk.empty:
+                break  # ingen flere data i dette år
+
+            # Forbered data
+            chunk["date"] = pd.to_datetime(chunk["date"])
+            chunk["period"] = chunk["date"].dt.to_period(data_frq).astype(str)
+
+            # Gem hver chunk direkte pr. periode
+            for period, grp in chunk.groupby("period"):
+                fn = output_dir / f"option data {period}.csv"
+                if first_chunk and not fn.exists():
+                    # Første gang: skriv med header
+                    grp.to_csv(fn, index=False, mode='w')
+                else:
+                    # Senere: tilføj uden header
+                    grp.to_csv(fn, index=False, mode='a', header=False)
+
+            if return_df:
+                df_year_chunks.append(chunk)
+
+            first_chunk = False
+            offset += chunk_size  # næste offset
+
+        if return_df and df_year_chunks:
+            all_years.append(pd.concat(df_year_chunks, ignore_index=True))
+
+    if return_df and all_years:
+        return pd.concat(all_years, ignore_index=True)
+    return None
+
+
+
 
 # def fetch_options_data(db, begdate, enddate, tickers, csv_path):
 #     # Konverter datoer til SQL-format
@@ -499,6 +692,8 @@ def fetch_forward_prices_progress(db, begdate, enddate, tickers, csv_path):
             # Opdater progress bar
             pbar.update(1)
 
+    df_list = [d for d in df_list if not d.empty]
+
     df = pd.concat(df_list, ignore_index=True)
     df.sort_values(by=["ticker", "date"], inplace=True)
     df.to_csv(csv_path, index=False)
@@ -635,7 +830,7 @@ def fetch_forward_prices(db, begdate, enddate, tickers, csv_path):
 
 
 
-def fetch_stock_returns_progress(db, begdate, enddate, tickers, csv_path):
+def fetch_stock_returns_progress(db, begdate, enddate, tickers, csv_path): ### OM VERSION
     """
     Optimeret fetch_stock_returns med en dynamisk progress bar (tqdm).
     
@@ -679,11 +874,11 @@ def fetch_stock_returns_progress(db, begdate, enddate, tickers, csv_path):
     df_list = []
 
     # Opret progress bar
-    with tqdm(total=end_year - start_year, desc="Collecting data", unit="years") as pbar:
+    with tqdm(total = end_year - start_year, desc="Collecting data", unit="years") as pbar:
         for year in range(start_year, end_year):
             query = f"""
                 SELECT p.secid, s.ticker, s.cusip, s.issuer, 
-                       p.date, p.open, p.close, p.return
+                       p.date, p.open, p.close, p.return, s.issue_type, s.exchange_d
                 FROM optionm.secprd{year} p
                 LEFT JOIN optionm.securd1 s ON p.secid = s.secid
                 WHERE p.date BETWEEN {begdate_sql} AND {enddate_sql}
@@ -703,6 +898,77 @@ def fetch_stock_returns_progress(db, begdate, enddate, tickers, csv_path):
     
     print(f"Data collected and saved: {len(df)} rows.") 
     return df
+
+
+
+
+# def fetch_stock_returns_progress(db, begdate, enddate, tickers, csv_path): ### CRSP VERSION
+#     """
+#     Fetch stock returns fra CRSP via WRDS, med progress bar.
+
+#     Args:
+#         db: WRDS databaseforbindelse
+#         begdate (str): Startdato i 'YYYY-MM-DD' format
+#         enddate (str): Slutdato i 'YYYY-MM-DD' format
+#         tickers (list): Liste af tickers
+#         csv_path (str): Sti til output CSV-fil
+#     """
+
+#     # expand enddate for RV calculation 
+#     enddate_extended = (pd.to_datetime(enddate) + pd.Timedelta(days=60)).strftime('%Y-%m-%d')
+
+#     # Konverter til SQL-format
+#     begdate_sql = f"'{begdate}'"
+#     enddate_sql = f"'{enddate_extended}'"
+
+#     # Hent PERMNO for de valgte tickers
+#     permno_list = None
+#     if tickers:
+#         if isinstance(tickers, str):
+#             tickers = [tickers]
+
+#         ticker_df = db.raw_sql(f"""
+#             SELECT permno, ticker, cusip, comnam as issuer
+#             FROM crsp.dsenames
+#             WHERE ticker IN ({', '.join(f"'{t}'" for t in tickers)})
+#         """)
+
+#         permno_list = ticker_df["permno"].tolist()
+
+#         if len(permno_list) == 1:
+#             permno_str = f"({permno_list[0]})"
+#         elif permno_list:
+#             permno_str = f"({', '.join(map(str, permno_list))})"
+#         else:
+#             permno_str = "(NULL)"
+
+#     # Hent al data på én gang fra CRSP
+#     query = f"""
+#         SELECT d.permno, n.ticker, n.cusip, n.comnam as issuer,
+#                d.date, d.bidlo as open, d.prc as close, d.ret as return
+#         FROM crsp.dsf d
+#         LEFT JOIN crsp.dsenames n ON d.permno = n.permno
+#         WHERE d.date BETWEEN {begdate_sql} AND {enddate_sql}
+#           AND n.namedt <= d.date AND d.date <= n.nameendt
+#     """
+
+#     if permno_list:
+#         query += f" AND d.permno IN {permno_str}"
+
+#     df = db.raw_sql(query, date_cols=["date"])
+
+#     #remove related tickers
+#     df = df[df["ticker"].isin(tickers)]
+#     # Sorter og gem
+#     df.sort_values(by=["ticker", "date"], inplace=True)
+#     df.to_csv(csv_path, index=False)
+
+#     print(f"Data collected and saved: {len(df)} rows.")
+#     return df
+
+
+
+
 
 
 
@@ -933,70 +1199,152 @@ def fetch_dividends_progress(db, begdate, enddate, tickers, csv_path):
 #     return Option_metrics_path
 
 
-def fetch_wrds_data(db, folder_name, begdate, enddate, tickers=None, data_types=["O", "F", "S", "Z"], return_df=False, progress=False, chunk_size = 1500000):
-    """
-    Henter WRDS data (options, forward prices, stock returns) og gemmer i en mappe.
+# def fetch_wrds_data(db, folder_name, begdate, enddate, save_per = None, tickers=None, data_types=["O", "F", "S", "Z"], return_df=False, progress=False, chunk_size = 1500000):
+#     """
+#     Henter WRDS data (options, forward prices, stock returns) og gemmer i en mappe.
     
-    Args:
-        db: WRDS databaseforbindelse
-        profile (str): Brugerprofil til mappehåndtering
-        folder_name (str): Navn på mappen til at gemme data
-        begdate (str): Startdato i 'YYYY-MM-DD' format
-        enddate (str): Slutdato i 'YYYY-MM-DD' format
-        tickers (list, optional): Liste over tickers
-        data_types (list, optional): Liste af datatyper ("O", "F", "S")
-        return_df (bool, optional): Returnerer dataframes hvis True
-        progress (bool, optional): Bruger progress-bar version af funktionerne hvis True
+#     Args:
+#         db: WRDS databaseforbindelse
+#         profile (str): Brugerprofil til mappehåndtering
+#         folder_name (str): Navn på mappen til at gemme data
+#         begdate (str): Startdato i 'YYYY-MM-DD' format
+#         enddate (str): Slutdato i 'YYYY-MM-DD' format
+#         tickers (list, optional): Liste over tickers
+#         data_types (list, optional): Liste af datatyper ("O", "F", "S")
+#         return_df (bool, optional): Returnerer dataframes hvis True
+#         progress (bool, optional): Bruger progress-bar version af funktionerne hvis True
 
-    Returns:
-        dict: Dataframes som dictionary med keys "O", "F", "S" hvis return_df=True, ellers None
+#     Returns:
+#         dict: Dataframes som dictionary med keys "O", "F", "S" hvis return_df=True, ellers None
+#     """
+
+#     # Find base directory for brugerprofil
+#     base_dir = load.dirs()["OptionMetrics"] / folder_name
+#     # base_dir = load.Option_metrics_path_from_profile(profile) / folder_name # todo: use this function instead, haven't tested
+
+
+#     # Tjek om mappen allerede eksisterer og indeholder filer
+#     if base_dir.exists() and any(base_dir.iterdir()):
+#         print(f"Folder '{folder_name}' already exists. Aborting.")
+#         return None
+
+#     # Opret mappen, hvis den ikke findes
+#     base_dir.mkdir(parents=True, exist_ok=True)
+
+#     # Mapping af funktioner og filnavne
+#     function_map = {
+#         "O": (fetch_options_data_progress if progress else fetch_options_data, "option data.csv"),
+#         "F": (fetch_forward_prices_progress if progress else fetch_forward_prices, "forward price.csv"),
+#         "S": (fetch_stock_returns_progress if progress else fetch_stock_returns, "returns and stock price.csv"),
+#         "Z": (fetch_zerocoupons, "ZC yield curve.csv"),
+#         "D": (fetch_dividends_progress, "Dividends.csv")
+#     }
+
+#     # Initialiser dictionary til dataframes
+#     data_results = {}
+
+#     # Hent de valgte datatyper
+#     for data_type in data_types:
+#         if data_type not in function_map:
+#             raise ValueError(f"data_type: {data_type} is not accepted. Use only 'O', 'F', 'S'.")
+
+#         fetch_function, filename = function_map[data_type]
+#         csv_path = base_dir / filename  # Generer den rigtige filsti
+
+#         print(f"Importing {data_type}-data and saving to: {csv_path}")
+#         if data_type == "O":
+#             df = fetch_function(db, begdate, enddate, tickers, csv_path, chunk_size=chunk_size, return_df=return_df)
+#         elif data_type == "Z":
+#             df = fetch_function(db, begdate, enddate, csv_path)
+#         else:
+#             df = fetch_function(db, begdate, enddate, tickers, csv_path)
+#         # Hvis return_df=True, gem dataframe i dictionary
+#         if return_df:
+#             data_results[data_type] = df
+
+#     return data_results if return_df else None
+
+
+def fetch_wrds_data(db, folder_name, begdate, enddate,
+                    save_per=None,
+                    tickers=None,
+                    data_types=["O", "F", "S", "Z"],
+                    return_df=False,
+                    progress=False,
+                    chunk_size=1_500_000):
+    """
+    Henter WRDS-data og gemmer i en mappe. 
+    Hvis save_per="M" eller "Y", splittes O-data per måned/år i output-mappen.
     """
 
-    # Find base directory for brugerprofil
+    from pathlib import Path
+
     base_dir = load.dirs()["OptionMetrics"] / folder_name
-    # base_dir = load.Option_metrics_path_from_profile(profile) / folder_name # todo: use this function instead, haven't tested
-
-
-    # Tjek om mappen allerede eksisterer og indeholder filer
     if base_dir.exists() and any(base_dir.iterdir()):
         print(f"Folder '{folder_name}' already exists. Aborting.")
         return None
-
-    # Opret mappen, hvis den ikke findes
     base_dir.mkdir(parents=True, exist_ok=True)
 
-    # Mapping af funktioner og filnavne
-    function_map = {
-        "O": (fetch_options_data_progress if progress else fetch_options_data, "option data.csv"),
-        "F": (fetch_forward_prices_progress if progress else fetch_forward_prices, "forward price.csv"),
-        "S": (fetch_stock_returns_progress if progress else fetch_stock_returns, "returns and stock price.csv"),
-        "Z": (fetch_zerocoupons, "ZC yield curve.csv"),
-        "D": (fetch_dividends_progress, "Dividends.csv")
-    }
+    # Gå datatyper igennem
+    results = {}
 
-    # Initialiser dictionary til dataframes
-    data_results = {}
-
-    # Hent de valgte datatyper
     for data_type in data_types:
-        if data_type not in function_map:
-            raise ValueError(f"data_type: {data_type} is not accepted. Use only 'O', 'F', 'S'.")
-
-        fetch_function, filename = function_map[data_type]
-        csv_path = base_dir / filename  # Generer den rigtige filsti
-
-        print(f"Importing {data_type}-data and saving to: {csv_path}")
         if data_type == "O":
-            df = fetch_function(db, begdate, enddate, tickers, csv_path, chunk_size=chunk_size, return_df=return_df)
+            if save_per in ("M", "Y"):
+                print(f"Importing O-data split per '{save_per}' into folder: {base_dir}")
+                df = fetch_options_data_multiplefiles(
+                    db=db,
+                    begdate=begdate,
+                    enddate=enddate,
+                    tickers=tickers,
+                    output_dir=base_dir / "option data",
+                    data_frq=save_per,
+                    return_df=return_df,
+                    chunk_size=chunk_size
+                )
+            else:
+                csv_path = base_dir / "option data.csv"
+                print(f"Importing O-data into single file: {csv_path}")
+                df = (fetch_options_data_progress if progress else fetch_options_data)(
+                    db=db,
+                    begdate=begdate,
+                    enddate=enddate,
+                    tickers=tickers,
+                    csv_path=csv_path,
+                    chunk_size=chunk_size,
+                    return_df=return_df
+                )
+
+        elif data_type == "F":
+            csv_path = base_dir / "forward price.csv"
+            print(f"Importing F-data into: {csv_path}")
+            df = (fetch_forward_prices_progress if progress else fetch_forward_prices)(
+                db=db, begdate=begdate, enddate=enddate,
+                tickers=tickers, csv_path=csv_path
+            )
+
+        elif data_type == "S":
+            csv_path = base_dir / "returns and stock price.csv"
+            print(f"Importing S-data into: {csv_path}")
+            df = (fetch_stock_returns_progress if progress else fetch_stock_returns)(
+                db=db, begdate=begdate, enddate=enddate,
+                tickers=tickers, csv_path=csv_path
+            )
+
         elif data_type == "Z":
-            df = fetch_function(db, begdate, enddate, csv_path)
+            csv_path = base_dir / "ZC yield curve.csv"
+            print(f"Importing Z-data into: {csv_path}")
+            df = fetch_zerocoupons(db=db, begdate=begdate, enddate=enddate, csv_path=csv_path)
+
+        elif data_type == "D":
+            csv_path = base_dir / "Dividends.csv"
+            print(f"Importing D-data into: {csv_path}")
+            df = fetch_dividends_progress(db=db, begdate=begdate, enddate=enddate, tickers=tickers, csv_path=csv_path)
+
         else:
-            df = fetch_function(db, begdate, enddate, tickers, csv_path)
-        # Hvis return_df=True, gem dataframe i dictionary
+            raise ValueError(f"data_type '{data_type}' ikke understøttet.")
+
         if return_df:
-            data_results[data_type] = df
+            results[data_type] = df
 
-    return data_results if return_df else None
-
-
-
+    return results if return_df else None
