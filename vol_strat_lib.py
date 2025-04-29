@@ -17,6 +17,8 @@ def import_sum_raw(om_folder):
     od_raw = pd.read_csv(f"{om_folder}/{time_type}od_raw.csv")
     od_raw['optionid'] = od_raw['optionid'].astype(int)
     od_raw["date"] = pd.to_datetime(od_raw["date"])
+
+    sum_df.loc[sum_df["SW_0_30"] <= 1e-6, "SW_0_30"] = 1e-6
     return sum_df, od_raw
 
 
@@ -34,6 +36,9 @@ def import_orpy_sum(om_folder):
     # Fix for double assets (for some reason the wrong ones have close == 0)
     sum_df = sum_df[(sum_df["open"] > 0) & (sum_df["close"] > 0)].copy()
     orpy_df = orpy_df[(orpy_df["open"] > 0) & (orpy_df["close"] > 0)].copy()
+
+    sum_df.loc[sum_df["SW_0_30"] <= 1e-6, "SW_0_30"] = 1e-6
+    orpy_df.loc[orpy_df["SW_0_30"] <= 1e-6, "SW_0_30"] = 1e-6
 
     return orpy_df, sum_df
 

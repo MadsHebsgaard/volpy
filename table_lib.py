@@ -93,13 +93,12 @@ def CarrWu_order(df):
 
 
 
-def table_dataset_list_strike_count(df, name):
+def table_dataset_list_strike_count(df, name, width_scale=0.75):
     if name == "VIX":
         df = df[df["ticker"] != "TLT"]
 
     df_nonan = df[df["SW_0_30"].notna()]
 
-    # add Q5_K aggregation
     table_df = (
         df_nonan
         .groupby("ticker")
@@ -115,57 +114,171 @@ def table_dataset_list_strike_count(df, name):
         .reset_index()
     )
 
-    # table_df = CarrWu_order(table_df)
     table_df = table_df.sort_values("NK", ascending=False).reset_index(drop=True)
+
+    # ─── insert row-number column ─────────────────────────────────────────────
+    table_df.insert(0, "No.", table_df.index + 1)
+    # ──────────────────────────────────────────────────────────────────────────
 
     # format dates and types
     table_df["Starting_date"] = pd.to_datetime(table_df["Starting_date"]).dt.strftime("%d-%b-%Y")
     table_df["Ending_date"]   = pd.to_datetime(table_df["Ending_date"]).dt.strftime("%d-%b-%Y")
-    table_df["N"]   = table_df["N"].astype(int)
-    table_df["NK"]  = table_df["NK"].astype(float)
+    table_df["N"]    = table_df["N"].astype(int)
+    table_df["NK"]   = table_df["NK"].astype(float)
     table_df["Q1_K"] = table_df["Q1_K"].astype(float)
     table_df["Q5_K"] = table_df["Q5_K"].astype(float)
-    table_df["Q10_K"] = table_df["Q10_K"].astype(float)
+    table_df["Q10_K"]= table_df["Q10_K"].astype(float)
 
-    # 1) get a raw LaTeX snippet (with its own environment)
+    # get raw LaTeX
     raw = table_df.to_latex(
         index=False,
         header=False,
         float_format="%.1f"
     )
 
-    # 2) pull out only the lines between \midrule and \bottomrule
+    # pull out only the data rows
     lines = raw.splitlines()
-    # find where the data rows start and end
     start = next(i for i, l in enumerate(lines) if l.strip() == r'\midrule') + 1
     end   = next(i for i, l in enumerate(lines) if l.strip() == r'\bottomrule')
     body  = "\n".join(lines[start:end])
 
-    # 3) build your full table with the two‐row header
+    # build full table with updated header (added "No." at left)
     full_table = (
         r"\begin{table}[ht]" "\n"
         r"\centering" "\n"
-        r"\begin{tabular}{lllrrrrr}" "\n"
+        r"\renewcommand{\arraystretch}{1}" "\n"
+        rf"\adjustbox{{max width={width_scale}\textwidth}}{{" "\n"
+        # changed {lllrrrrr} → {rlllrrrrr} to make room for No.
+        r"\begin{tabular}{rlllrrrrr}" "\n"
         r"\toprule" "\n"
-        r"Ticker & Starting date & Ending date & Days & \multicolumn{4}{c}{Number of strikes} \\" "\n"
-        r"\cmidrule(lr){5-8}" "\n"
-        r" &  &  &  & Mean & 1\% & 5\% & 10\% \\" "\n"
+        r"No.\ & Ticker & Starting date & Ending date & Days & \multicolumn{4}{c}{Number of strikes} \\" "\n"
+        r"\cmidrule(lr){6-9}" "\n"
+        r" &  &  &  &  & Mean & 1\% & 5\% & 10\% \\" "\n"
         r"\midrule" "\n"
         + body + "\n"
         r"\bottomrule" "\n"
         r"\end{tabular}" "\n"
+        r"}" "\n"
         rf"\caption{{List of stocks and stock indexes in the {name} sample.}}" "\n"
         rf"\label{{tab:data_summary_table_{name}}}" "\n"
         r"\end{table}"
     )
 
-    # 4) write out
     out_path = f'figures/summary/data_summary_table_{name}.tex'
     with open(out_path, 'w') as f:
         f.write(full_table)
 
+    return table_df
+
+
+
+
+
+
+def table_dataset_list_strike_count_pages(df, name, width_scale=0.75):
+    if name == "VIX":
+        df = df[df["ticker"] != "TLT"]
+
+    df_nonan = df[df["SW_0_30"].notna()]
+
+    # aggregate
+    table_df = (
+        df_nonan
+        .groupby("ticker")
+        .agg(
+            Starting_date=("date", "min"),
+            Ending_date  =("date", "max"),
+            N            =("date", "count"),
+            NK           =("#K",   "mean"),
+            Q1_K         =("#K", lambda x: x.quantile(0.01)),
+            Q5_K         =("#K", lambda x: x.quantile(0.05)),
+            Q10_K        =("#K", lambda x: x.quantile(0.10))
+        )
+        .reset_index()
+    )
+
+    # sort & row-numbers
+    table_df = table_df.sort_values("NK", ascending=False).reset_index(drop=True)
+    table_df.insert(0, "No.", table_df.index + 1)
+
+    # format types & dates
+    table_df["Starting_date"] = pd.to_datetime(table_df["Starting_date"]).dt.strftime("%d-%b-%Y")
+    table_df["Ending_date"]   = pd.to_datetime(table_df["Ending_date"]).dt.strftime("%d-%b-%Y")
+    table_df["N"]    = table_df["N"].astype(int)
+    table_df["NK"]   = table_df["NK"].astype(float)
+    table_df["Q1_K"] = table_df["Q1_K"].astype(float)
+    table_df["Q5_K"] = table_df["Q5_K"].astype(float)
+    table_df["Q10_K"]= table_df["Q10_K"].astype(float)
+
+    # get raw LaTeX rows
+    raw = table_df.to_latex(index=False, header=False, float_format="%.1f")
+    lines = raw.splitlines()
+    start = next(i for i, l in enumerate(lines) if l.strip() == r'\midrule') + 1
+    end   = next(i for i, l in enumerate(lines) if l.strip() == r'\bottomrule')
+    body  = "\n".join(lines[start:end])
+
+    # choose longtable if >50 rows
+    if len(table_df) > 50:
+        full_table = (
+            rf"\begin{{adjustbox}}{{max width={width_scale}\textwidth}}{{%" "\n"
+            r"\begin{longtable}{rlllrrrrr}" "\n"
+            # caption + first‐page head
+            r"\caption{" + f"List of stocks and stock indexes in the {name} sample." + r"}\\" "\n"
+            r"\toprule" "\n"
+            r"No.\ & Ticker & Starting date & Ending date & Days & \multicolumn{4}{c}{Number of strikes} \\" "\n"
+            r"\cmidrule(lr){6-9}" "\n"
+            r" &  &  &  &  & Mean & 1\% & 5\% & 10\% \\" "\n"
+            r"\midrule" "\n"
+            r"\endfirsthead" "\n"
+            # repeated head
+            r"\toprule" "\n"
+            r"No.\ & Ticker & Starting date & Ending date & Days & \multicolumn{4}{c}{Number of strikes} \\" "\n"
+            r"\cmidrule(lr){6-9}" "\n"
+            r" &  &  &  &  & Mean & 1\% & 5\% & 10\% \\" "\n"
+            r"\midrule" "\n"
+            r"\endhead" "\n"
+            # foot for all but last page
+            r"\bottomrule" "\n"
+            r"\endfoot" "\n"
+            + body + "\n"
+            # final footer + closures
+            r"\bottomrule" "\n"
+            r"\end{longtable}" "\n"
+            r"}"
+        )
+    else:
+        full_table = (
+            r"\begin{table}[ht]" "\n"
+            r"\centering" "\n"
+            r"\renewcommand{\arraystretch}{1}" "\n"
+            rf"\adjustbox{{max width={width_scale}\textwidth}}{{" "\n"
+            r"\begin{tabular}{rlllrrrrr}" "\n"
+            r"\toprule" "\n"
+            r"No.\ & Ticker & Starting date & Ending date & Days & \multicolumn{4}{c}{Number of strikes} \\" "\n"
+            r"\cmidrule(lr){6-9}" "\n"
+            r" &  &  &  &  & Mean & 1\% & 5\% & 10\% \\" "\n"
+            r"\midrule" "\n"
+            + body + "\n"
+            r"\bottomrule" "\n"
+            r"\end{tabular}" "\n"
+            r"}" "\n"
+            rf"\caption{{List of stocks and stock indexes in the {name} sample.}}" "\n"
+            rf"\label{{tab:data_summary_table_{name}}}" "\n"
+            r"\end{table}"
+        )
+
+    # write out .tex file
+    out_path = f'figures/summary/data_summary_table_{name}.tex'
+    with open(out_path, 'w') as f:
+        f.write(full_table)
 
     return table_df
+
+
+
+
+
+
 
 
 
