@@ -530,90 +530,6 @@ def table_dataset_list_strike_count_pages_1(df, name, width_scale=0.75):
 
 
 
-def table_dataset_list_strike_count_pages_old2(df, name, width_scale):
-    if name == "VIX":
-        df = df[df["ticker"] != "TLT"]
-
-    df_nonan = df[df["SW_0_30"].notna()]
-
-    table_df = (
-        df_nonan
-        .groupby("ticker")
-        .agg(
-            Starting_date=("date", "min"),
-            Ending_date=("date", "max"),
-            N=("date", "count"),
-            NK=("#K", "mean"),
-            Q1_K=("#K", lambda x: x.quantile(0.01)),
-            Q5_K=("#K", lambda x: x.quantile(0.05)),
-            Q10_K=("#K", lambda x: x.quantile(0.10))
-        )
-        .reset_index()
-    )
-
-    table_df = table_df.sort_values("NK", ascending=False).reset_index(drop=True)
-
-    # Insert row-number column
-    table_df.insert(0, "No.", table_df.index + 1)
-
-    # Format dates and types
-    table_df["Starting_date"] = pd.to_datetime(table_df["Starting_date"]).dt.strftime("%d-%b-%Y")
-    table_df["Ending_date"] = pd.to_datetime(table_df["Ending_date"]).dt.strftime("%d-%b-%Y")
-    table_df["N"] = table_df["N"].astype(int)
-    table_df["NK"] = table_df["NK"].astype(float)
-    table_df["Q1_K"] = table_df["Q1_K"].astype(float)
-    table_df["Q5_K"] = table_df["Q5_K"].astype(float)
-    table_df["Q10_K"] = table_df["Q10_K"].astype(float)
-
-    # Get raw LaTeX
-    raw = table_df.to_latex(
-        index=False,
-        header=False,
-        float_format="%.1f"
-    )
-
-    # Extract data rows
-    lines = raw.splitlines()
-    start = next(i for i, l in enumerate(lines) if l.strip() == r'\midrule') + 1
-    end = next(i for i, l in enumerate(lines) if l.strip() == r'\bottomrule')
-    body = "\n".join(lines[start:end])
-
-    # Build longtable structure
-    full_table = (
-        r"\begin{center}" + "\n"
-        r"\renewcommand{\arraystretch}{1}" + "\n"
-        r"\begin{longtable}{rlllrrrrr}" + "\n"
-        rf"\caption{{List of stocks and stock indexes in the {name} sample.}} \label{{tab:data_summary_table_{name}}} \\" + "\n"
-        r"\toprule" + "\n"
-        r"No. & Ticker & Starting date & Ending date & Days & \multicolumn{4}{c}{Number of strikes} \\" + "\n"
-        r"\cmidrule(lr){6-9}" + "\n"
-        r" &  &  &  &  & Mean & 1\% & 5\% & 10\% \\" + "\n"
-        r"\midrule" + "\n"
-        r"\endfirsthead" + "\n\n"
-        r"\multicolumn{9}{c}{{\tablename\ \thetable{} -- continued from previous page}} \\" + "\n"
-        r"\toprule" + "\n"
-        r"No. & Ticker & Starting date & Ending date & Days & \multicolumn{4}{c}{Number of strikes} \\" + "\n"
-        r"\cmidrule(lr){6-9}" + "\n"
-        r" &  &  &  &  & Mean & 1\% & 5\% & 10\% \\" + "\n"
-        r"\midrule" + "\n"
-        r"\endhead" + "\n\n"
-        r"\midrule" + "\n"
-        r"\multicolumn{9}{r}{{Continued on next page}} \\" + "\n"
-        r"\endfoot" + "\n\n"
-        r"\bottomrule" + "\n"
-        r"\endlastfoot" + "\n\n"
-        + body + "\n"
-        r"\end{longtable}" + "\n"
-        r"\end{center}"
-    )
-
-    out_path = f'figures/summary/data_summary_table_{name}.tex'
-    with open(out_path, 'w') as f:
-        f.write(full_table)
-
-    return table_df
-
-
 
 
 import pandas as pd
@@ -659,11 +575,67 @@ def CarrWu2009_table_2(summary_dly_df, name):
     out = out.drop(columns="NK")
 
     # 3) generate & save LaTeX
-    latex = CarrWu2009_table_2_latex(out)   # now returns a string
+    latex = CarrWu2009_table_2_latex_v2(out, name)   # now returns a string
     with open(f"figures/Analysis/{name}_table_2.tex","w") as f:
         f.write(latex)
 
     return out
+
+def CarrWu2009_table_2_latex_v2(table_df, name):
+    # ——— reorder & set up MultiIndex (unchanged) ———
+    table_df = table_df[
+        ["ticker",
+         "Mean_RV","Std_RV","Auto_RV","Skew_RV","Kurt_RV",
+         "Mean_SW","Std_SW","Auto_SW","Skew_SW","Kurt_SW"]
+    ]
+    table_df.insert(0, ("", "No."), range(1, len(table_df) + 1))
+    table_df.columns = pd.MultiIndex.from_tuples([
+        ("", "No."),
+        ("",    "Ticker"),
+        ("Panel A: Realized variance, RV×100",  "Mean"),
+        ("Panel A: Realized variance, RV×100",  "Std. dev."),
+        ("Panel A: Realized variance, RV×100",  "Auto"),
+        ("Panel A: Realized variance, RV×100",  "Skew"),
+        ("Panel A: Realized variance, RV×100",  "Kurt"),
+        ("Panel B: Variance swap rate, SW×100",  "Mean"),
+        ("Panel B: Variance swap rate, SW×100",  "Std. dev."),
+        ("Panel B: Variance swap rate, SW×100",  "Auto"),
+        ("Panel B: Variance swap rate, SW×100",  "Skew"),
+        ("Panel B: Variance swap rate, SW×100",  "Kurt"),
+    ])
+
+    # ——— generate a longtable instead of a tabular ———
+    latex = table_df.to_latex(
+        index=False,
+        float_format="%.2f",
+        multicolumn=True,
+        multirow=True,
+        longtable=True,
+        caption=(
+            f"Summary statistics for the realized variance and the synthetic swap rate for the {name} dataset. "
+            "Autocorrelation (\"Auto\") is not adjusted for serial dependence, hence its high value, "
+            "and kurtosis (\"Kurt\") is excessive."
+        ),
+        label=f"tab:analysis:Summary statistics realized variance and swap ({name})",
+        column_format='rlrrrrr||rrrrr',
+        multicolumn_format="c"
+    )
+
+    # ——— inject the cmidrule lines under the top header ———
+    lines = latex.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip().startswith(r'\toprule'):
+            # after \toprule and the header row comes \midrule;
+            # so insert two lines down
+            lines.insert(i + 2, r'\cmidrule(lr){3-7}\cmidrule(lr){8-12}')
+            break
+
+    # ——— add size commands & float barrier ———
+    lines.insert(0, r'\scriptsize')
+    lines.append(r'\normalsize')
+    lines.append(r'\FloatBarrier')
+
+    return "\n".join(lines)
 
 
 def CarrWu2009_table_2_latex(table_df):
@@ -673,7 +645,11 @@ def CarrWu2009_table_2_latex(table_df):
          "Mean_RV","Std_RV","Auto_RV","Skew_RV","Kurt_RV",
          "Mean_SW","Std_SW","Auto_SW","Skew_SW","Kurt_SW"]
     ]
+
+    table_df.insert(0, ("", "No."), range(1, len(table_df) + 1))
+
     table_df.columns = pd.MultiIndex.from_tuples([
+        ("", "No."),
         ("",    "Ticker"),
         ("Panel A: Realized variance, RV×100",  "Mean"),
         ("Panel A: Realized variance, RV×100",  "Std. dev."),
@@ -693,8 +669,8 @@ def CarrWu2009_table_2_latex(table_df):
         float_format="%.2f",
         multicolumn=True,
         multirow=True,
-        column_format='lrrrrr||rrrrr',
-        multicolumn_format = "c",
+        column_format='rlrrrrr||rrrrr',   # r for No., l for Ticker, etc.
+        multicolumn_format="c",
     )
 
     # inject the cmidrule lines
@@ -705,6 +681,9 @@ def CarrWu2009_table_2_latex(table_df):
             insert_pos = i + 2
             break
     lines.insert(insert_pos, r'\cmidrule(lr){2-6}\cmidrule(lr){7-11}')
+
+    lines.insert(0, r'\scriptsize')
+    lines.append(r'\normalsize')
 
     return '\n'.join(lines)
 
@@ -835,15 +814,81 @@ def CarrWu2009_table_3(summary_dly_df, name):
     out = CarrWu_order(out)
 
     # 3) Generate LaTeX and write file
-    latex = CarrWu2009_table_3_latex(out)
+    latex = CarrWu2009_table_3_latex_v2(out, name)
     with open(f"figures/Analysis/{name}_table_3.tex", "w") as f:
         f.write(latex)
 
     return out
 
 
+def CarrWu2009_table_3_latex_v2(table_df, name):
+    """
+    Generates a longtable with:
+      - Line number
+      - Panel A: (RV - SW) × 100 (Mean, Std. dev., Auto, Skew, Kurt, t)
+      - Panel B: ln(RV / SW) (Mean, Std. dev., Auto, Skew, Kurt, t, SR)
+    """
+    # 1) Reorder & set up MultiIndex
+    table_df = table_df[
+        [
+            "ticker",
+            "Mean_diff", "Std_diff", "Auto_diff", "Skew_diff", "Kurt_diff", "t_diff",
+            "Mean_ln",   "Std_ln",   "Auto_ln",   "Skew_ln",   "Kurt_ln",   "t_ln",  "SR_ann"
+        ]
+    ]
+    # insert line numbers
+    table_df.insert(0, ("", "No."), range(1, len(table_df) + 1))
+    # rename columns to a two‐level header
+    table_df.columns = pd.MultiIndex.from_tuples([
+        ("",                           "No."),
+        ("",                       "Ticker"),
+        ("Panel A: (RV – SW) × 100",   "Mean"),
+        ("Panel A: (RV – SW) × 100",   "Std. dev."),
+        ("Panel A: (RV – SW) × 100",   "Auto"),
+        ("Panel A: (RV – SW) × 100",   "Skew"),
+        ("Panel A: (RV – SW) × 100",   "Kurt"),
+        ("Panel A: (RV – SW) × 100",     "t"),
+        ("Panel B: ln(RV / SW)",        "Mean"),
+        ("Panel B: ln(RV / SW)",        "Std. dev."),
+        ("Panel B: ln(RV / SW)",        "Auto"),
+        ("Panel B: ln(RV / SW)",        "Skew"),
+        ("Panel B: ln(RV / SW)",        "Kurt"),
+        ("Panel B: ln(RV / SW)",        "t"),
+        ("Panel B: ln(RV / SW)",        "SR")
+    ])
 
-import re
+    # 2) Export as longtable
+    latex = table_df.to_latex(
+        index=False,
+        float_format="%.2f",
+        multicolumn=True,
+        multirow=True,
+        longtable=True,
+        caption=(
+            rf"Summary statistics for (RV – SW) $\times$ 100 and ln(RV / SW) for the {name} dataset. "
+            "Each panel shows Mean, Std. dev., Auto(1), Skew, Kurt, and t-statistic; "
+            "Panel B also reports an annualized Sharpe ratio (SR)."
+        ),
+        label=f"tab:analysis:Summary statistics diff and logratio ({name})",
+        column_format='rlcccccc||ccccccc',
+        multicolumn_format="c"
+    )
+
+    # 3) Inject cmidrule under the top header
+    lines = latex.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip().startswith(r'\toprule'):
+            # after \toprule and the next header line
+            lines.insert(i + 2, r'\cmidrule(lr){3-8}\cmidrule(lr){9-15}')
+            break
+
+    # 4) Add size commands & float barrier
+    lines.insert(0, r'\scriptsize')
+    lines.append(r'\normalsize')
+    lines.append(r'\FloatBarrier')
+
+    return "\n".join(lines)
+
 
 def CarrWu2009_table_3_latex(table_df):
     """
