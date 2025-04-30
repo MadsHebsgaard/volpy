@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from dask.dataframe import read_csv
 from scipy.stats import norm
 from datetime import datetime
 import sys
@@ -32,6 +33,10 @@ def load_option_data(file_path, valid_dates):
         "best_offer",
         "volume",
         "impl_volatility",
+        "ss_flag",
+        "exchange_d",
+        "issue_type",
+        "issuer",
         # "delta",
         # "index_flag",
         # "forward_price",
