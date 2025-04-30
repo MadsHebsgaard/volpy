@@ -9,10 +9,6 @@ from pathlib import Path
 
 
 def fetch_options_data_per_ticker(db, begdate, enddate, tickers, base_dir, chunk_size=100_000):
-    """
-    Hent optionsdata pr. ticker og gem hele datasættet i én CSV-fil,
-    uden at akkumulere hele datasættet i hukommelsen.
-    """
 
     base_dir = Path(base_dir)
     base_dir.mkdir(parents=True, exist_ok=True)
@@ -35,7 +31,7 @@ def fetch_options_data_per_ticker(db, begdate, enddate, tickers, base_dir, chunk
 
             # Find SECIDs for ticker
             secid_df = db.raw_sql(f"""
-                SELECT secid
+                SELECT secid, issuer
                 FROM optionm.securd1
                 WHERE ticker = '{ticker}'
             """)
@@ -56,10 +52,10 @@ def fetch_options_data_per_ticker(db, begdate, enddate, tickers, base_dir, chunk
 
             while True:
                 sql_chunk = f"""
-                    SELECT o.secid, s.ticker, o.optionid,
+                    SELECT o.secid, s.ticker, s.issuer, o.optionid,
                         o.date, o.exdate, o.cp_flag, o.strike_price,
                         o.best_bid, o.best_offer, o.impl_volatility,
-                        o.volume, o.open_interest, s.issue_type, s.exchange_d
+                        o.volume, o.open_interest, s.issue_type, s.exchange_d, o.ss_flag
                     FROM {base_table}
                     JOIN optionm.securd1 s ON o.secid = s.secid
                     WHERE o.date BETWEEN '{begdate}' AND '{enddate}'
@@ -117,7 +113,7 @@ def fetch_forward_prices_per_ticker(db, begdate, enddate, tickers, base_dir, chu
             """)
 
             if secid_df.empty:
-                continue  # spring ticker over hvis ingen SECID findes
+                continue  
 
             secids = secid_df["secid"].tolist()
             secid_sql = f"({','.join(map(str, secids))})"
@@ -215,6 +211,86 @@ def fetch_stock_returns_per_ticker(db, begdate, enddate, tickers, base_dir):
     return None
 
 
+def fetch_stock_returns_per_ticker_om(db, begdate, enddate, tickers, base_dir, chunk_size=100_000):
+
+    from pathlib import Path
+    from tqdm import tqdm
+
+    base_dir = Path(base_dir)
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    if isinstance(tickers, str):
+        tickers = [tickers]
+
+    start_year = max(int(begdate[:4]), 1996)
+    end_year = min(int(enddate[:4]) + 1, 2024)
+
+    # Forbered samlet view af alle år med kun nødvendige kolonner
+    union_tables = " \nUNION ALL\n ".join(
+        f"SELECT secid, date, open, close, return FROM optionm.secprd{year}"
+        for year in range(start_year, end_year)
+    )
+    base_table = f"({union_tables}) AS p"
+
+    with tqdm(tickers, desc="Importing stock returns from OM", unit="ticker") as pbar:
+        for ticker in pbar:
+            pbar.set_postfix({"ticker": ticker})
+
+            # Find SECIDs for ticker
+            secid_df = db.raw_sql(f"""
+                SELECT secid, ticker, cusip, issuer, issue_type, exchange_d
+                FROM optionm.securd1
+                WHERE ticker = '{ticker}'
+            """)
+
+            if secid_df.empty:
+                print(f"[!] No SECID found for ticker: {ticker}")
+                continue
+
+            secids = secid_df["secid"].tolist()
+            secid_sql = f"({','.join(map(str, secids))})"
+
+            offset = 0
+            first_chunk = True
+
+            # Forbered output path
+            ticker_output_dir = base_dir / "Tickers" / "Returns OM" / ticker
+            ticker_output_dir.mkdir(parents=True, exist_ok=True)
+            output_file = ticker_output_dir / f"returns and stock price OM.csv"
+
+            while True:
+                sql_chunk = f"""
+                    SELECT 
+                        p.secid, s.ticker, s.cusip, s.issuer, 
+                        p.date, p.open, p.close, p.return,
+                        s.issue_type, s.exchange_d
+                    FROM {base_table}
+                    LEFT JOIN optionm.securd1 s ON p.secid = s.secid
+                    WHERE p.date BETWEEN '{begdate}' AND '{enddate}'
+                      AND p.secid IN {secid_sql}
+                    LIMIT {chunk_size} OFFSET {offset}
+                """
+
+                chunk = db.raw_sql(sql_chunk, date_cols=["date"])
+
+                if chunk.empty:
+                    if offset == 0:
+                        print(f"[!] No return data found for ticker: {ticker}")
+                    break
+
+                if first_chunk:
+                    chunk.to_csv(output_file, index=False, mode='w')
+                else:
+                    chunk.to_csv(output_file, index=False, mode='a', header=False)
+
+                first_chunk = False
+                offset += chunk_size
+
+    return None
+
+
+
+
 def fetch_zerocoupons(db, begdate, enddate, csv_path):
 
     # Konverter datoer til SQL-format
@@ -243,8 +319,10 @@ def fetch_zerocoupons(db, begdate, enddate, csv_path):
 
 
 
-def fetch_wrds_data_per_ticker(db, tickers, begdate="1996-01-01", enddate="2023-12-31", data_types=["O", "F", "S", "Z"], chunk_size=1000000):
+def fetch_wrds_data_per_ticker(db, tickers, begdate="1996-01-01", enddate="2024-12-31", data_types=["O", "F", "S", "Z"], chunk_size=1000000):
 
+    #rmeoviing dublicates in case
+    tickers = list(set(tickers))
 
     base_dir = load.dirs()["OptionMetrics"]
     base_dir = Path(base_dir)
@@ -257,12 +335,16 @@ def fetch_wrds_data_per_ticker(db, tickers, begdate="1996-01-01", enddate="2023-
             skipped_tickers.append(ticker)
         else:
             tickers_to_fetch.append(ticker)
+            
+    if "S_OM" in data_types:
+        fetch_stock_returns_per_ticker_om(db, begdate, enddate, tickers, base_dir) #run for all tickers it is fast anyway
 
     if skipped_tickers:
         print(f"Skipping already existing tickers: {', '.join(skipped_tickers)}")
 
     if not tickers_to_fetch:
         print("No new tickers to fetch. Exiting.")
+    
         return None
 
     # Loop over datatyper
@@ -284,7 +366,10 @@ def fetch_wrds_data_per_ticker(db, tickers, begdate="1996-01-01", enddate="2023-
             else:
                 print(f"Importing yield curve data into: {csv_path}")
                 fetch_zerocoupons(db=db, begdate=begdate, enddate=enddate, csv_path=csv_path)
-
+        
+        elif data_type == "S_OM":
+            continue
+        
         else:
             raise ValueError(f"data_type '{data_type}' not supported.")
 
