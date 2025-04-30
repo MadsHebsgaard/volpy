@@ -518,7 +518,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from volpy_func_ticker_lib import days_type
 
 
-def fix_returns_ticker(ticker_list=["SPX","NDX","OEX","DJX"]):
+def fix_index_bloomberg_OM_returns(ticker_list=["SPX","NDX","OEX","DJX"]):
     base_dir   = load_clean_lib.Option_metrics_path_from_profile()
     input_dir  = base_dir / "Tickers" / "Input"
     index_data_dir = base_dir / "Tickers" / "index data"
