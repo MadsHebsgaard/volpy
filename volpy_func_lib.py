@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from dask.dataframe import read_csv
+# from dask.dataframe import read_csv
 from scipy.stats import norm
 from datetime import datetime
 import sys
@@ -2310,13 +2310,7 @@ Car_wu_tickers = ["SPX", "OEX", "DJX", "NDX", "QQQ", "MSFT", "INTC", "IBM", "AME
     "TRV", "WCOM", "TYC", "AMAT", "QCOM", "TXN", "PFE", "MOT", "EMC", "HWP",
     "AMGN", "BRCM", "MER", "NOK", "CHL", "UNPH", "EBAY", "JNPR", "CIEN", "BRCD"
 ]
-
-
-# np.array(vp.dirs_to_list())
-Output_tickers = dirs_to_list()
-
-
-import json
+# Output_tickers = dirs_to_list()
 
 
 def get_company_name(ticker):

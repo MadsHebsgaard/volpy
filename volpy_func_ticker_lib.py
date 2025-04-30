@@ -175,8 +175,8 @@ def load_clean_and_prepare_od_ticker(ticker, valid_dates, ZCY_curves, IV_type = 
     od[f"IV_{IV_type}"] = od["IV"]
 
     # Intrinsic value
-    flag = 1 if od["cp_flag"] == "C" else -1
-    od["intrinsic"] = max(flag * (od["F"] - od["K"]), 0)
+    flag = np.where(od["cp_flag"] == 'C', 1, -1)  # now a numeric array
+    od["intrinsic"] = np.maximum(flag * (od["F"] - od["K"]), 0)
     od["mid_intrinsic_diff"] = od["mid"] - od["intrinsic"]
 
     od_raw = od.copy()
