@@ -522,36 +522,41 @@ def fix_returns_ticker(ticker_list=["SPX","NDX","OEX","DJX"]):
     base_dir   = load_clean_lib.Option_metrics_path_from_profile()
     input_dir  = base_dir / "Tickers" / "Input"
     index_data_dir = base_dir / "Tickers" / "index data"
+    OM_returns_dir = base_dir / "Tickers" / "Returns OM"
+    input_ticker_dir = base_dir / "Tickers" / "Input"
 
     for ticker in ticker_list:
-        CRSP_path      = input_dir / ticker / 'returns and stock price.csv'
+        OM_path      = OM_returns_dir / ticker / 'returns and stock price OM.csv'
         Bloomberg_path = index_data_dir / f'{ticker}.csv'
-        if not CRSP_path.exists():
-            print(f"File {CRSP_path!r} not found; skipping ticker.")
+        if not OM_path.exists():
+            print(f"File {OM_path!r} not found; skipping ticker.")
             continue
-        print(f"{ticker!r} (returns and stock price.csv) fixed.")
 
         # load
-        df_CRSP      = pd.read_csv(CRSP_path)
+        df_OM        = pd.read_csv(OM_path)
         df_Bloomberg = pd.read_csv(Bloomberg_path)
 
         # parse dates
-        df_CRSP['date']      = pd.to_datetime(df_CRSP['date'],      dayfirst=False)
+        df_OM['date']      = pd.to_datetime(df_OM['date'],      dayfirst=False)
         df_Bloomberg['date'] = pd.to_datetime(df_Bloomberg['date'], dayfirst=False)
+        df_Bloomberg = df_Bloomberg[df_Bloomberg["return"].isna()==False]
 
         # # keep old return around
         # df_CRSP['return_old'] = df_CRSP['return']
 
         # OPTION A: overwrite in-place via index alignment
-        df_CRSP.set_index('date', inplace=True)
-        df_CRSP['return'] = df_Bloomberg.set_index('date')['return']
-        df_CRSP.reset_index(inplace=True)
+        df_OM.set_index('date', inplace=True)
+        df_OM['return'] = df_Bloomberg.set_index('date')['return']
+        df_OM.reset_index(inplace=True)
 
         # optional: sort by date
-        df_CRSP.sort_values('date', inplace=True)
+        df_OM.sort_values('date', inplace=True)
 
         # save
-        df_CRSP.to_csv(CRSP_path, index=False)
+        save_dir = input_ticker_dir / ticker / 'returns and stock price.csv'
+        df_OM.to_csv(save_dir, index=False)
+        print(f"{ticker!r} (returns and stock price.csv) fixed.")
+
 
 
 def _process_one_ticker_sgys(
