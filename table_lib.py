@@ -1,8 +1,9 @@
 import pandas as pd
 import numpy as np
 import os
-
+import volpy_func_lib as vp
 from load_clean_lib import etf_to_underlying, ticker_to_vol
+from volpy_func_lib import Cross_AM_tickers
 
 
 def CarrWu_tickers():
@@ -171,7 +172,7 @@ def table_dataset_list_strike_count(df, name, width_scale=0.75):
     return table_df
 
 
-def table_dataset_list_strike_count_pages(df, name, width_scale=0.75):
+def table_dataset_list_strike_count_pages(df, name, width_scale=0.75, sort_types = False):
     if name == "VIX":
         df = df[df["ticker"] != "TLT"]
 
@@ -191,8 +192,36 @@ def table_dataset_list_strike_count_pages(df, name, width_scale=0.75):
         )
         .reset_index()
     )
+    # assign group: 0=index, 1=ETF, 2=other
+    idx_CAM_set = set(vp.Index_tickers)
+    etf_set = set(vp.ETF_tickers)
+    cols = table_df.columns.copy()
 
-    table_df = table_df.sort_values("NK", ascending=False).reset_index(drop=True)
+    if sort_types:
+        table_df["group"] = table_df["ticker"].map(
+            lambda t: 0 if t in idx_CAM_set else (1 if t in etf_set else 2)
+        )
+
+        # add asset_class (0–4) for sorting
+        table_df["asset_class"] = table_df["ticker"].map(vp.ticker_to_asset_code)
+
+        # sort by group (lowest first), then asset_class (lowest first), then NK (highest first)
+        table_df = (
+            table_df
+            .sort_values(
+                ["asset_class", "group", "NK"],
+                ascending=[True, True, False]
+            )
+            .reset_index(drop=True)
+        )
+        table_df = table_df[cols]
+    else:
+        table_df = (
+            table_df
+            .sort_values("NK", ascending=False)
+            .reset_index(drop=True)
+        )
+
     table_df.insert(0, "No.", table_df.index + 1)
 
     # Formatting
@@ -203,6 +232,7 @@ def table_dataset_list_strike_count_pages(df, name, width_scale=0.75):
     table_df["Q1_K"] = table_df["Q1_K"].round(1)
     table_df["Q5_K"] = table_df["Q5_K"].round(1)
     table_df["Q10_K"] = table_df["Q10_K"].round(1)
+    table_df["Name"] = [name.replace("&", r"\&") for name in vp.ticker_list_to_name_list(table_df["ticker"])]
 
     # LaTeX generation
     raw = table_df.to_latex(index=False, header=False, float_format="%.1f")
@@ -225,27 +255,29 @@ def table_dataset_list_strike_count_pages(df, name, width_scale=0.75):
     if num_rows > 50:
         full_table = (
             rf"{font_size}" + "\n"
-            r"\begin{longtable}{@{}rlrlrrrrr@{}}" + "\n"
+            r"\begin{longtable}{@{}rlrlrrrrrl@{}}" + "\n"
             rf"\caption{{List of stocks and stock indexes in the {name} sample}} \\" + "\n"
             r"\toprule" + "\n"
-            r"No. & Ticker & \multicolumn{1}{l}{Start Date} & \multicolumn{1}{l}{End Date} & Days & \multicolumn{4}{c}{Strike Count} \\" + "\n"
+            r"No. & Ticker & \multicolumn{1}{c}{Start Date} & \multicolumn{1}{c}{End Date} & \multicolumn{1}{c}{Days} & \multicolumn{4}{c}{Strike Count} & \multicolumn{1}{c}{Name} \\" + "\n"
             r"\cmidrule(r){6-9}" + "\n"
-            r" &  &  &  &  & Mean & 1\% & 5\% & 10\% \\" + "\n"
+            r" &  &  &  &  & Mean & 1\% & 5\% & 10\% & \\" + "\n"
             r"\midrule" + "\n"
             r"\endfirsthead" + "\n\n"
-            r"\multicolumn{9}{c}{{\tablename\ \thetable{} -- Continued}} \\" + "\n"
+            r"\multicolumn{10}{c}{{\tablename\ \thetable{} -- Continued}} \\" + "\n"
             r"\toprule" + "\n"
-            r"No. & Ticker & Start Date & End Date & Days & \multicolumn{4}{c}{Strike Count} \\" + "\n"
+            r"No. & Ticker & \multicolumn{1}{c}{Start Date} & \multicolumn{1}{c}{End Date} & \multicolumn{1}{c}{Days} & \multicolumn{4}{c}{Strike Count} & \multicolumn{1}{c}{Name} \\" + "\n"
             r"\cmidrule(r){6-9}" + "\n"
-            r" &  &  &  &  & Mean & 1\% & 5\% & 10\% \\" + "\n"
+            r" &  &  &  &  & Mean & 1\% & 5\% & 10\% & \\" + "\n"
             r"\midrule" + "\n"
             r"\endhead" + "\n\n"
             r"\midrule" + "\n"
-            r"\multicolumn{9}{r}{{Continued}} \\" + "\n"
+            r"\multicolumn{10}{r}{{Continued}} \\" + "\n"
             r"\endfoot" + "\n\n"
             r"\bottomrule" + "\n"
             r"\endlastfoot" + "\n\n"
             + body + "\n"
+            rf"\caption{{List of stocks and stock indexes in the {name} sample}}" + "\n"
+            rf"\label{{tab:data_summary_{name}}}" + "\n"
             r"\end{longtable}" + "\n"
             r"\normalsize"  # Reset font size
         )
@@ -254,11 +286,11 @@ def table_dataset_list_strike_count_pages(df, name, width_scale=0.75):
             r"\begin{table}[ht]" + "\n"
             r"\centering" + "\n"
             rf"{font_size}" + "\n"
-            r"\begin{tabular}{rlrlrrrrr}" + "\n"
+            r"\begin{tabular}{rlrlrrrrrl}" + "\n"
             r"\toprule" + "\n"
-            r"No. & Ticker & Start Date & End Date & Days & \multicolumn{4}{c}{Strike Count} \\" + "\n"
+            r"No. & Ticker & \multicolumn{1}{c}{Start Date} & \multicolumn{1}{c}{End Date} & \multicolumn{1}{c}{Days} & \multicolumn{4}{c}{Strike Count} & \multicolumn{1}{c}{Name} \\" + "\n"
             r"\cmidrule(r){6-9}" + "\n"
-            r" &  &  &  &  & Mean & 1\% & 5\% & 10\% \\" + "\n"
+            r" &  &  &  &  & Mean & 1\% & 5\% & 10\% & \\" + "\n"
             r"\midrule" + "\n"
             + body + "\n"
             r"\bottomrule" + "\n"

@@ -2157,6 +2157,9 @@ def plot_ticker_SW_minus_vix_scaled(df, ticker, figsize = (10, 6), show_fig = Tr
 
     return
 
+
+
+
 def get_unique_tickers(list_of_lists):
     unique_tickers = set()
     for lst in list_of_lists:
@@ -2164,46 +2167,132 @@ def get_unique_tickers(list_of_lists):
     return list(unique_tickers)
 
 
+_ASSET_CLASS = {
+    # Equity Markets (0)
+    'SPX': 0, 'OEX': 0, 'OEF': 0, "DJX": 0, 'QQQ': 0, 'NDX': 0, 'SPY':0, 'DIA':0, 'VGK': 0, 'FXI': 0, 'EWJ': 0, 'EWZ': 0,
+    'INDA': 0, 'EZA': 0, 'EWC': 0, 'EWU': 0, 'EWY': 0, 'EEM': 0,
+    'EWA': 0, 'EWW': 0, 'VNQ': 0,
+    # Fixed Income (1)
+    'TLT': 1, 'SHY': 1, 'TIP': 1, 'LQD': 1, 'HYG': 1, 'EMB': 1,
+    # Commodities (2)
+    'IAU': 2, 'SLV': 2, 'UNG': 2, 'USO': 2,
+    # Currency (3)
+    'UUP': 3, 'FXE': 3, 'FXY': 3, 'CEW': 3,
+    # None of the above
+    'UVXY': 4, 'BITO': 4,
+}
+def ticker_to_asset_code(ticker: str) -> int:
+    """
+    Return:
+      0 for Equity Markets,
+      1 for Fixed Income,
+      2 for Commodities,
+      3 for Currency,
+      4 for anything else.
+    """
+    return _ASSET_CLASS.get(ticker, 4)
+
+
+ticker_to_name_Cross_AM = {
+    # Indexes
+    "SPX": "S&P 500 Index",
+    "OEX": "S&P 100 Index",
+    "NDX": "NASDAQ 100 Index",
+    "DJX": "Dow Jones Ind. Average Index",
+
+    # Major ETFs
+    "SPY": "S&P 500 ETF Trust",
+    "OEF": "S&P 100 ETF",
+    "QQQ": "NASDAQ 100 Index ETF",
+    "DIA": "Dow Jones Ind. Average ETF",
+    "IWM": "Russell 2000 ETF",
+    "EEM": "Emerging Markets ETF",
+
+    # Cross‐market ETFs
+    "VGK": "Europe ETF",
+    "FXI": "China ETF",
+    "EWJ": "Japan ETF",
+    "EWZ": "Brazil ETF",
+    "INDA":"India ETF",
+    "EZA": "South Africa ETF",
+    "EWC": "Canada ETF",
+    "EWU": "United Kingdom ETF",
+    "EWY": "South Korea ETF",
+    "EWA": "Australia ETF",
+    "EWW": "Mexico ETF",
+    "VNQ": "Real Estate ETF",
+    "TIP": "TIPS Bond ETF",
+    "LQD": "Investment Grade Corp. Bond ETF",
+    "HYG": "High Yield Corp. Bond ETF",
+    "EMB": "Emerging Markets Bond ETF",
+    "IAU": "Gold Trust",
+    "SLV": "Silver Trust",
+    "UNG": "Natural Gas Fund",
+    "USO": "Oil Fund",
+    "UVXY": "VIX Short-Term Futures ETF",
+    "UUP": " US Dollar Trust",
+    "FXE": " Euro Trust",
+    "FXY": " Japanese Yen Trust",
+    "BITO": "Bitcoin ETF",
+}
+
+
+def Index_ETF_stock(name):
+    if "Index" in name:
+        return 0
+    if "ETF" in name:
+        return 1
+    return 2
+def Index_ETF_stock_list(name_list):
+    return [Index_ETF_stock(name) for name in name_list]
+
+
+
 from pathlib import Path
-def ticker_to_name(ticker):
+def ticker_to_name_CSV(ticker):
     base_dir = load_clean_lib.Option_metrics_path_from_profile()
     df_path = Path(base_dir) / "Tickers" / "Input" / ticker / "returns and stock price.csv"
 
-    # ensure the file exists
-    if not df_path.is_file():
-        raise FileNotFoundError(f"No CSV found for ticker '{ticker}' at {df_path}")
+    if ticker not in OEX_tickers: #Cross_AM_tickers + Liquid_ETF_Idx_tickers:
+        name = ticker_to_name_Cross_AM.get(ticker, ticker)
+    else:
+        # ensure the file exists
+        if not df_path.is_file():
+            print(f"No CSV found for ticker '{ticker}' at {df_path}")
+            return ''
 
-    df = pd.read_csv(df_path)
+        df = pd.read_csv(df_path)
 
-    # grab the first value in the 'issuer' column and return it
-    return df['issuer'].iloc[0]
+        # grab the first value in the 'issuer' column and return it
+        name = df['issuer'].iloc[0]
+        name = name.title()
 
-def tickers_to_names(ticker_list):
-    """
-    Given a list of ticker symbols, returns a list of issuer names
-    by calling ticker_to_name for each ticker.
-    """
-    names = []
-    for ticker in ticker_list:
-        # this will raise FileNotFoundError if the CSV doesn't exist
-        name = ticker_to_name(ticker)
-        names.append(name)
-    return names
+    return name
+
+def ticker_list_to_name_list(ticker_list):
+    return [ticker_to_name_CSV(ticker) for ticker in ticker_list]
 
 
 
-
-
+from pathlib import Path
+def dirs_to_list():
+    base_dir   = load_clean_lib.Option_metrics_path_from_profile()
+    ticker_dir = Path(base_dir) / "Tickers" / "Input"
+    subdirs    = [p.name for p in ticker_dir.iterdir() if p.is_dir()]
+    return subdirs
 
 
 
 # removed tickers = ["TLT", "SHY", "CEW"] (TLT removed from VIX and Cross-AM, SHY and CEW removed from Cross-AM)
 OEX_tickers = ["OEX", "OEF", "AA", "AAPL", "ABBV", "ABT", "ACN", "ADBE", "AEP", "AES", "AGN", "AIG", "ALL", "AMD", "AMGN", "AMT", "AMZN", "APA", "APC", "ATI", "AVGO", "AVP", "AXP", "BA", "BAC", "BAX", "BDK", "BHI", "BIIB", "BK", "BKNG", "BMY", "BNI", "BRK", "BUD", "C", "CAT", "CELG", "CGP", "CHTR", "CI", "CL", "CLB", "CMCSA", "CMCSK", "COF", "COP", "COST", "COV", "CPB", "CRM", "CSC", "CSCO", "CVS", "CVX", "DAL", "DD", "DE", "DELL", "DHR", "DIS", "DOW", "DUK", "DVN", "EBAY", "EMC", "EMR", "ENE", "EP", "ETR", "EXC", "F", "FCX", "FDX", "G", "GBLX", "GD", "GE", "GILD", "GM", "GOOG", "GOOGL", "GS", "GTX", "HAL", "HCA", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JCI", "JNJ", "JPM", "KHC", "KMI", "KO", "LEH", "LIN", "LLY", "LMT", "LOW", "MA", "MAY", "MCD", "MDLZ", "MDT", "MER", "MET", "META", "MMM", "MO", "MON", "MRK", "MS", "MSFT", "NEE", "NFLX", "NKE", "NOV", "NSC", "NSM", "NT", "NVDA", "NXTL", "NYX", "OMX", "ONE", "ORCL", "OXY", "PARA", "PEP", "PFE", "PG", "PM", "PNU", "PYPL", "QCOM", "RAL", "RF", "ROK", "RSH", "RTN", "RTX", "S", "SBUX", "SCHW", "SGP", "SLB", "SO", "SPG", "T", "TGT", "TMO", "TMUS", "TOY", "TSLA", "TWX", "TXN", "UBAN", "UIS", "UNH", "UNP", "UPS", "USB", "V", "VZ", "WB", "WBA", "WFC", "WMB", "WMT", "WY", "WYE", "XOM", "XRX"]
-Cross_AM_tickers =  ["SPX", "VGK", "FXI", "EWJ", "EWZ", "INDA", "EZA", "EWC", "EWU", "EWY", "EWA", "EWW", "VNQ", "TIP", "LQD", "HYG", "EMB", "IAU", "SLV", "UNG", "USO", "UVXY", "UUP", "FXE", "FXY", "BITO" ]
+Cross_AM_tickers =  ["SPX", "VGK", "FXI", "EWJ", "EWZ", "INDA", "EZA", "EWC", "EEM", "EWU", "EWY", "EWA", "EWW", "VNQ", "TIP", "LQD", "HYG", "EMB", "IAU", "SLV", "UNG", "USO", "UVXY", "UUP", "FXE", "FXY", "BITO" ]
 VIX_tickers = ["SPX", "GOOGL", "AMZN", "DIA", "IWM", "QQQ", "AAPL", "EWZ", "USO", "GS", "EEM", "FXE", "SLV", "IBM"]
 DJX_tickers = ["DJX", "AA", "AAPL", "AIG", "AMGN", "AMZN", "AXP", "BA", "BAC", "C", "CAT", "CRM", "CSCO", "CVX", "DD", "DIS", "DOW", "GE", "GM", "GS", "GT", "HD", "HON", "HPQ", "IBM", "INTC", "IP", "JNJ", "JPM", "KO", "MCD", "MMM", "MO", "MRK", "MSFT", "NKE", "PFE", "PG", "RTX", "S", "T", "TRV", "UK", "UNH", "V", "VZ", "WBA", "WMT", "XOM"]
 
-Liquid_ETF_Idx_tickers = ["SPX", "SPY", "OEX", "OEF", "NDX", "QQQ", "DJX", "DIA"]
+
+Index_tickers = ["SPX", "OEX", "NDX", "DJX"]
+ETF_tickers   = ["SPY", "OEF", "QQQ", "DIA"]
+Liquid_ETF_Idx_tickers = Index_tickers + ETF_tickers
 Liquid_stock_tickers = ['GOOG', 'BKNG', 'TSLA', 'GOOGL', 'AMZN', 'META', 'NFLX', 'MA', 'PYPL', 'AAPL', 'AVGO', 'CHTR', 'NVDA', 'CRM', 'ABBV', 'HCA', 'V', 'GS', 'WB', 'GM', 'PM', 'MSFT', 'PARA', 'BA', 'ADBE', 'TMUS', 'OXY', 'MET', 'DE', 'DAL', 'BIIB', 'JPM', 'CAT', 'DIS', 'COST', 'COF', 'IBM', 'QCOM', 'GILD', 'ACN', 'UNH', 'C']
 Liquid_tickers = Liquid_ETF_Idx_tickers + Liquid_stock_tickers
 
@@ -2216,3 +2305,37 @@ Car_wu_tickers = ["SPX", "OEX", "DJX", "NDX", "QQQ", "MSFT", "INTC", "IBM", "AME
     "TRV", "WCOM", "TYC", "AMAT", "QCOM", "TXN", "PFE", "MOT", "EMC", "HWP",
     "AMGN", "BRCM", "MER", "NOK", "CHL", "UNPH", "EBAY", "JNPR", "CIEN", "BRCD"
 ]
+
+
+# np.array(vp.dirs_to_list())
+Output_tickers = dirs_to_list()
+
+
+import json
+
+
+def get_company_name(ticker):
+    base_dir = load_clean_lib.Option_metrics_path_from_profile()
+    ticker_data_path = base_dir / "Tickers" / "ticker_info.csv"
+
+    # Load the CSV into a DataFrame
+    df = pd.read_csv(ticker_data_path, dtype=str)
+
+    # Normalize the symbol column and the lookup ticker to uppercase
+    df['Symbol'] = df['Symbol'].str.upper()
+    ticker = ticker.upper()
+
+    # Find the row where Symbol matches, then return the Name column
+    match = df.loc[df['Symbol'] == ticker, 'Name']
+    if not match.empty:
+        name = match.iloc[0]
+        name = name.replace(" New Common Stock", "")
+        name = name.replace(" Common Stock", "")
+        name = name.replace("Class A", "")
+        name = name.replace("Class B", "")
+        name = name.replace(" (The)", "")
+        return name
+    return None
+
+
+
