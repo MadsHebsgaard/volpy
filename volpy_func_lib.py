@@ -2171,5 +2171,5 @@ Liquid_ETF_Idx_tickers = ["SPX", "SPY", "OEX", "OEF", "NDX", "QQQ", "DJX", "DIA"
 Liquid_stock_tickers = ['GOOG', 'BKNG', 'TSLA', 'GOOGL', 'AMZN', 'META', 'NFLX', 'MA', 'PYPL', 'AAPL', 'AVGO', 'CHTR', 'NVDA', 'CRM', 'ABBV', 'HCA', 'V', 'GS', 'WB', 'GM', 'PM', 'MSFT', 'PARA', 'BA', 'ADBE', 'TMUS', 'OXY', 'MET', 'DE', 'DAL', 'BIIB', 'JPM', 'CAT', 'DIS', 'COST', 'COF', 'IBM', 'QCOM', 'GILD', 'ACN', 'UNH', 'C']
 Liquid_tickers = Liquid_ETF_Idx_tickers + Liquid_stock_tickers
 
-ALL_tickers = get_unique_tickers([OEX_tickers, Cross_AM_tickers, VIX_tickers, Liquid_ETF_Idx])
+ALL_tickers = get_unique_tickers([OEX_tickers, Cross_AM_tickers, VIX_tickers, Liquid_tickers])
 
