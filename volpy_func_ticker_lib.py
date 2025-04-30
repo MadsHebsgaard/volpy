@@ -165,7 +165,7 @@ def load_clean_and_prepare_od_ticker(ticker, valid_dates, ZCY_curves, IV_type = 
     # load data
     od, FW, returns_and_prices = load_od_FW_ticker(ticker, valid_dates)
 
-    returns_and_prices = returns_and_prices[(returns_and_prices["open"] > 0) & (returns_and_prices["close"] > 0)]
+    # returns_and_prices = returns_and_prices[(returns_and_prices["open"] > 0) & (returns_and_prices["close"] > 0)]
 
     # add forward (before cleaning such that od_raw has the forward rate, used in options trats for ATM options that might be slightly ITM)
     od = add_FW_to_od_ticker(od, FW)
@@ -174,7 +174,12 @@ def load_clean_and_prepare_od_ticker(ticker, valid_dates, ZCY_curves, IV_type = 
     od["IV"] = vp.add_bid_mid_ask_IV(od, IV_type, safe_slow_IV = safe_slow_IV)
     od[f"IV_{IV_type}"] = od["IV"]
 
-    od_raw = od
+    # Intrinsic value
+    flag = 1 if od["cp_flag"] == "C" else -1
+    od["intrinsic"] = max(flag * (od["F"] - od["K"]), 0)
+    od["mid_intrinsic_diff"] = od["mid"] - od["intrinsic"]
+
+    od_raw = od.copy()
 
     # clean data (should be looked upon)
     od = clean_od_ticker(od)
