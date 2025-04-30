@@ -18,7 +18,8 @@ clean_t_days = global_settings.clean_t_days
 importlib.reload(load_clean_lib)
 
 
-def load_option_data(file_path):
+def load_option_data(file_path, valid_dates):
+
     import os
     columns_to_load = [
         "ticker",
@@ -60,9 +61,6 @@ def load_option_data(file_path):
 
     # load valid dates
     unique_calendar_days = df["date"].drop_duplicates().sort_values()  # [df["ticker"] == "SPX"]
-    valid_dates_path = os.path.join(os.path.dirname(os.path.dirname(file_path)), "dates.csv")
-    valid_dates = pd.read_csv(valid_dates_path, usecols=["DATE"], parse_dates=["DATE"])
-    valid_dates.rename(columns={"DATE": "date"}, inplace=True)
     valid_dates = valid_dates[valid_dates["date"] >= unique_calendar_days.iloc[0]]
     valid_dates = valid_dates["date"]
 
@@ -1284,6 +1282,8 @@ def replicate_SW_K(group, n_points = 100):
     return group
 
 
+
+
 def load_analyze_create_swap(om_folder="i2s1_full_v2", ticker_list=["SPX", "OEX"], first_day=None, last_day=None,
                              IV_type="om", save_files = True, safe_slow_IV = False):
     # Load data and clean
@@ -2164,11 +2164,12 @@ def get_unique_tickers(list_of_lists):
     return list(unique_tickers)
 
 OEX_tickers = ["OEX", "OEF", "AA", "AAPL", "ABBV", "ABT", "ACN", "ADBE", "AEP", "AES", "AGN", "AIG", "ALL", "AMD", "AMGN", "AMT", "AMZN", "APA", "APC", "ATI", "AVGO", "AVP", "AXP", "BA", "BAC", "BAX", "BDK", "BHI", "BIIB", "BK", "BKNG", "BMY", "BNI", "BRK", "BUD", "C", "CAT", "CELG", "CGP", "CHTR", "CI", "CL", "CLB", "CMCSA", "CMCSK", "COF", "COP", "COST", "COV", "CPB", "CRM", "CSC", "CSCO", "CVS", "CVX", "DAL", "DD", "DE", "DELL", "DHR", "DIS", "DOW", "DUK", "DVN", "EBAY", "EMC", "EMR", "ENE", "EP", "ETR", "EXC", "F", "FCX", "FDX", "G", "GBLX", "GD", "GE", "GILD", "GM", "GOOG", "GOOGL", "GS", "GTX", "HAL", "HCA", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JCI", "JNJ", "JPM", "KHC", "KMI", "KO", "LEH", "LIN", "LLY", "LMT", "LOW", "MA", "MAY", "MCD", "MDLZ", "MDT", "MER", "MET", "META", "MMM", "MO", "MON", "MRK", "MS", "MSFT", "NEE", "NFLX", "NKE", "NOV", "NSC", "NSM", "NT", "NVDA", "NXTL", "NYX", "OMX", "ONE", "ORCL", "OXY", "PARA", "PEP", "PFE", "PG", "PM", "PNU", "PYPL", "QCOM", "RAL", "RF", "ROK", "RSH", "RTN", "RTX", "S", "SBUX", "SCHW", "SGP", "SLB", "SO", "SPG", "T", "TGT", "TMO", "TMUS", "TOY", "TSLA", "TWX", "TXN", "UBAN", "UIS", "UNH", "UNP", "UPS", "USB", "V", "VZ", "WB", "WBA", "WFC", "WMB", "WMT", "WY", "WYE", "XOM", "XRX"]
-Cross_AM_tickers =  ["SPX", "VGK", "FXI", "EWJ", "EWZ", "INDA", "EZA", "EWC",     "EWU", "EWY", "EWA", "EWW", "VNQ", "TLT", "SHY", "TIP", "LQD", "HYG", "EMB", "IAU", "SLV", "UNG", "USO", "UVXY", "UUP", "FXE", "FXY", "CEW", "BITO" ]
+Cross_AM_tickers =  ["SPX", "VGK", "FXI", "EWJ", "EWZ", "INDA", "EZA", "EWC", "EWU", "EWY", "EWA", "EWW", "VNQ", "TLT", "SHY", "TIP", "LQD", "HYG", "EMB", "IAU", "SLV", "UNG", "USO", "UVXY", "UUP", "FXE", "FXY", "CEW", "BITO" ]
 VIX_tickers = ["SPX", "GOOGL", "AMZN", "DIA", "IWM", "QQQ", "AAPL", "EWZ", "USO", "GS", "EEM", "FXE", "SLV", "IBM", "TLT"]
-ALL_tickers = get_unique_tickers([OEX_tickers, Cross_AM_tickers, VIX_tickers])
-ALL_ex_VIX_tickers = list(set(ALL_tickers) - set(VIX_tickers))
-Liquid_tickers = []
 
+Liquid_ETF_Idx_tickers = ["SPX", "SPY", "OEX", "OEF", "NDX", "QQQ", "DJX", "DIA"]
+Liquid_stock_tickers = ['GOOG', 'BKNG', 'TSLA', 'GOOGL', 'AMZN', 'META', 'NFLX', 'MA', 'PYPL', 'AAPL', 'AVGO', 'CHTR', 'NVDA', 'CRM', 'ABBV', 'HCA', 'V', 'GS', 'WB', 'GM', 'PM', 'MSFT', 'PARA', 'BA', 'ADBE', 'TMUS', 'OXY', 'MET', 'DE', 'DAL', 'BIIB', 'JPM', 'CAT', 'DIS', 'COST', 'COF', 'IBM', 'QCOM', 'GILD', 'ACN', 'UNH', 'C']
+Liquid_tickers = Liquid_ETF_Idx_tickers + Liquid_stock_tickers
 
+ALL_tickers = get_unique_tickers([OEX_tickers, Cross_AM_tickers, VIX_tickers, Liquid_ETF_Idx])
 
