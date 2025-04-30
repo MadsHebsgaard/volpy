@@ -2163,9 +2163,44 @@ def get_unique_tickers(list_of_lists):
         unique_tickers.update(lst)
     return list(unique_tickers)
 
+
+from pathlib import Path
+def ticker_to_name(ticker):
+    base_dir = load_clean_lib.Option_metrics_path_from_profile()
+    df_path = Path(base_dir) / "Tickers" / "Input" / ticker / "returns and stock price.csv"
+
+    # ensure the file exists
+    if not df_path.is_file():
+        raise FileNotFoundError(f"No CSV found for ticker '{ticker}' at {df_path}")
+
+    df = pd.read_csv(df_path)
+
+    # grab the first value in the 'issuer' column and return it
+    return df['issuer'].iloc[0]
+
+def tickers_to_names(ticker_list):
+    """
+    Given a list of ticker symbols, returns a list of issuer names
+    by calling ticker_to_name for each ticker.
+    """
+    names = []
+    for ticker in ticker_list:
+        # this will raise FileNotFoundError if the CSV doesn't exist
+        name = ticker_to_name(ticker)
+        names.append(name)
+    return names
+
+
+
+
+
+
+
+
+# removed tickers = ["TLT", "SHY", "CEW"] (TLT removed from VIX and Cross-AM, SHY and CEW removed from Cross-AM)
 OEX_tickers = ["OEX", "OEF", "AA", "AAPL", "ABBV", "ABT", "ACN", "ADBE", "AEP", "AES", "AGN", "AIG", "ALL", "AMD", "AMGN", "AMT", "AMZN", "APA", "APC", "ATI", "AVGO", "AVP", "AXP", "BA", "BAC", "BAX", "BDK", "BHI", "BIIB", "BK", "BKNG", "BMY", "BNI", "BRK", "BUD", "C", "CAT", "CELG", "CGP", "CHTR", "CI", "CL", "CLB", "CMCSA", "CMCSK", "COF", "COP", "COST", "COV", "CPB", "CRM", "CSC", "CSCO", "CVS", "CVX", "DAL", "DD", "DE", "DELL", "DHR", "DIS", "DOW", "DUK", "DVN", "EBAY", "EMC", "EMR", "ENE", "EP", "ETR", "EXC", "F", "FCX", "FDX", "G", "GBLX", "GD", "GE", "GILD", "GM", "GOOG", "GOOGL", "GS", "GTX", "HAL", "HCA", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JCI", "JNJ", "JPM", "KHC", "KMI", "KO", "LEH", "LIN", "LLY", "LMT", "LOW", "MA", "MAY", "MCD", "MDLZ", "MDT", "MER", "MET", "META", "MMM", "MO", "MON", "MRK", "MS", "MSFT", "NEE", "NFLX", "NKE", "NOV", "NSC", "NSM", "NT", "NVDA", "NXTL", "NYX", "OMX", "ONE", "ORCL", "OXY", "PARA", "PEP", "PFE", "PG", "PM", "PNU", "PYPL", "QCOM", "RAL", "RF", "ROK", "RSH", "RTN", "RTX", "S", "SBUX", "SCHW", "SGP", "SLB", "SO", "SPG", "T", "TGT", "TMO", "TMUS", "TOY", "TSLA", "TWX", "TXN", "UBAN", "UIS", "UNH", "UNP", "UPS", "USB", "V", "VZ", "WB", "WBA", "WFC", "WMB", "WMT", "WY", "WYE", "XOM", "XRX"]
-Cross_AM_tickers =  ["SPX", "VGK", "FXI", "EWJ", "EWZ", "INDA", "EZA", "EWC", "EWU", "EWY", "EWA", "EWW", "VNQ", "TLT", "SHY", "TIP", "LQD", "HYG", "EMB", "IAU", "SLV", "UNG", "USO", "UVXY", "UUP", "FXE", "FXY", "CEW", "BITO" ]
-VIX_tickers = ["SPX", "GOOGL", "AMZN", "DIA", "IWM", "QQQ", "AAPL", "EWZ", "USO", "GS", "EEM", "FXE", "SLV", "IBM", "TLT"]
+Cross_AM_tickers =  ["SPX", "VGK", "FXI", "EWJ", "EWZ", "INDA", "EZA", "EWC", "EWU", "EWY", "EWA", "EWW", "VNQ", "TIP", "LQD", "HYG", "EMB", "IAU", "SLV", "UNG", "USO", "UVXY", "UUP", "FXE", "FXY", "BITO" ]
+VIX_tickers = ["SPX", "GOOGL", "AMZN", "DIA", "IWM", "QQQ", "AAPL", "EWZ", "USO", "GS", "EEM", "FXE", "SLV", "IBM"]
 DJX_tickers = ["DJX", "AA", "AAPL", "AIG", "AMGN", "AMZN", "AXP", "BA", "BAC", "C", "CAT", "CRM", "CSCO", "CVX", "DD", "DIS", "DOW", "GE", "GM", "GS", "GT", "HD", "HON", "HPQ", "IBM", "INTC", "IP", "JNJ", "JPM", "KO", "MCD", "MMM", "MO", "MRK", "MSFT", "NKE", "PFE", "PG", "RTX", "S", "T", "TRV", "UK", "UNH", "V", "VZ", "WBA", "WMT", "XOM"]
 
 Liquid_ETF_Idx_tickers = ["SPX", "SPY", "OEX", "OEF", "NDX", "QQQ", "DJX", "DIA"]
@@ -2175,3 +2210,9 @@ Liquid_tickers = Liquid_ETF_Idx_tickers + Liquid_stock_tickers
 
 ALL_tickers = get_unique_tickers([OEX_tickers, Cross_AM_tickers, VIX_tickers, DJX_tickers, Liquid_tickers])
 
+
+Car_wu_tickers = ["SPX", "OEX", "DJX", "NDX", "QQQ", "MSFT", "INTC", "IBM", "AMER", "DELL",
+    "CSCO", "GE", "CPQ", "YHOO", "SUNW", "MU", "MO", "AMZN", "ORCL", "LU",
+    "TRV", "WCOM", "TYC", "AMAT", "QCOM", "TXN", "PFE", "MOT", "EMC", "HWP",
+    "AMGN", "BRCM", "MER", "NOK", "CHL", "UNPH", "EBAY", "JNPR", "CIEN", "BRCD"
+]
