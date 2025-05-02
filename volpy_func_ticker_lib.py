@@ -31,6 +31,8 @@ def load_od_FW_ticker(ticker, valid_dates):
 
     # Load hvert dataset direkte
     od = vp.load_option_data(ticker_dir / "option data.csv", valid_dates)
+
+
     FW = vp.load_forward_price(ticker_dir / "forward price.csv")
     ret = vp.load_returns_and_price(ticker_dir / "returns and stock price.csv")
 
@@ -239,6 +241,7 @@ def create_summary_dly_df_ticker(od, returns_and_prices, RF, n_grid=200):
 
     # Add low/high and create summary (Filters dataset for criteria such as min 3 strikes ... min 8 days...)
     od, summary_dly_df = vp.od_filter_and_summary_creater(od)
+
     summary_dly_df.reset_index(inplace=True)
 
     # Add risk-free rate of the given date
@@ -256,7 +259,8 @@ def create_summary_dly_df_ticker(od, returns_and_prices, RF, n_grid=200):
     # Calculate high/low Swap Rates
     summary_dly_df = high_low_swap_rates_ticker(summary_dly_df, od_rdy, n_points=n_grid)
 
-    return summary_dly_df, od_rdy
+
+    return summary_dly_df, od
 
 
 
@@ -372,7 +376,7 @@ def _process_one_ticker(
         summary_dly_df.to_csv(sum1_dir / f"{ticker}.csv", index=False)
         summary_dly_df.to_csv(out_dir / "sum1_df.csv",    index=False)
         od_raw.to_csv(       out_dir / "od_raw.csv",      index=False)
-        od.to_csv(           out_dir / "od_rdy.csv",      index=False)
+        od_rdy.to_csv(           out_dir / "od_rdy.csv",      index=False)
 
     finally:
         # Explicitly delete large objects and run garbage collector

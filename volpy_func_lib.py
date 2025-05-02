@@ -719,25 +719,72 @@ def process_group_activity_summary(group):
         summary["Active"] = False
         summary["Inactive reason"] = "min days <= 8 & len < 3"
         return group, summary 
+    
 
+    # Sørg for at 'K' er numerisk
+    group["K"] = pd.to_numeric(group["K"], errors="coerce")
+    # Tæl unikke strikes per exdate
+    k_per_ex = group.groupby(days_var)["K"].nunique()
+    # Gem gennemsnittet
+    summary["#K_before_filter"] = k_per_ex.mean()
+
+    
     summary["low days"] = low_2_days[0]
     summary["high days"] = low_2_days[1]
 
-    # Check unikke strike-antals for de valgte dage; kræv mindst 3
-    active = True
-    for day, label in zip(low_2_days, ["low", "high"]):
-        num_strikes = group.loc[group[days_var] == day, "K"].nunique()
-        summary[f"{label} #K"] = num_strikes
-        if num_strikes < 3:
-            active = False
-            summary["Active"] = False
-            summary["Inactive reason"] = "unique(K) < 3"
-    summary[f"#K"] = (summary[f"low #K"] + summary[f"high #K"]) / 2
-    if not active:
-        return group, summary
+    # # Check unikke strike-antals for de valgte dage; kræv mindst 3
+    # active = True
+    # for day, label in zip(low_2_days, ["low", "high"]):
+    #     num_strikes = group.loc[group[days_var] == day, "K"].nunique()
+    #     summary[f"{label} #K"] = num_strikes
+    #     if num_strikes < 3:
+    #         active = False
+    #         summary["Active"] = False
+    #         summary["Inactive reason"] = "unique(K) < 3"
+    # summary[f"#K"] = (summary[f"low #K"] + summary[f"high #K"]) / 2
+    # if not active:
+    #     return group, summary
 
-    summary["Active"] = True
-    summary["Inactive reason"] = ""
+
+    # Sørg for K er numerisk
+    group["K"] = pd.to_numeric(group["K"], errors="coerce")
+
+    # 1) Find low_day: tættest på cutoff under target_days
+    low_day = None
+    for day in sorted(days_below_target, reverse=True):
+        if group.loc[group[days_var] == day, "K"].dropna().nunique() >= 3:
+            low_day = day
+            break
+
+    # 2) Find high_day: tættest på cutoff over target_days
+    high_day = None
+    for day in sorted(days_above_target):
+        if group.loc[group[days_var] == day, "K"].dropna().nunique() >= 3:
+            high_day = day
+            break
+
+    # 3) Brug dem hvis begge fundet
+    if low_day is not None and high_day is not None:
+        summary["low days"]  = low_day
+        summary["high days"] = high_day
+
+        low_cnt  = group.loc[group[days_var] == low_day,  "K"].dropna().nunique()
+        high_cnt = group.loc[group[days_var] == high_day, "K"].dropna().nunique()
+        summary["low #K"]  = low_cnt
+        summary["high #K"] = high_cnt
+        summary["#K"]      = (low_cnt + high_cnt) / 2
+
+        summary["Active"]         = True
+        summary["Inactive reason"] = ""
+        group["low"]  = False # new cols 
+        group["high"] = False # new cols 
+        group.loc[group[days_var] == low_day,  "low"] = True # set new col to true for match
+        group.loc[group[days_var] == high_day, "high"] = True # set new col to true for match
+
+    else:
+        summary["Active"] = False
+        summary["Inactive reason"] = "unique(K) < 3"
+        return group, summary
 
     # Sæt 'low' og 'high' flags for de respektive rækker
     group.loc[group[days_var] == low_2_days[0], "low"] = True
