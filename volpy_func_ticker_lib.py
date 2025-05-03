@@ -163,37 +163,116 @@ def clean_od_ticker(od):
     return od
 
 
-def load_clean_and_prepare_od_ticker(ticker, valid_dates, ZCY_curves, IV_type = "od", safe_slow_IV = False):
-    # load data
+# def load_clean_and_prepare_od_ticker(ticker, valid_dates, ZCY_curves, IV_type = "od", safe_slow_IV = False):
+#     # load data
+#     od, FW, returns_and_prices = load_od_FW_ticker(ticker, valid_dates)
+
+#     # returns_and_prices = returns_and_prices[(returns_and_prices["open"] > 0) & (returns_and_prices["close"] > 0)]
+
+#     # add forward (before cleaning such that od_raw has the forward rate, used in options trats for ATM options that might be slightly ITM)
+#     od = add_FW_to_od_ticker(od, FW)
+
+#     # add IV to options (bid/ask/mid/om)
+#     od["IV"] = vp.add_bid_mid_ask_IV(od, IV_type, safe_slow_IV = safe_slow_IV)
+#     od[f"IV_{IV_type}"] = od["IV"]
+
+#     # # Intrinsic value
+#     # flag = np.where(od["cp_flag"] == 'C', 1, -1)  # now a numeric array
+#     # od["intrinsic"] = np.maximum(flag * (od["F"] - od["K"]), 0)
+#     # od["mid_intrinsic_diff"] = od["mid"] - od["intrinsic"]
+
+#     od_raw = od.copy()
+
+#     # clean data (should be looked upon)
+#     od = clean_od_ticker(od)
+
+#     # remove if ITM
+#     od = od.loc[((od["F"] < od["K"]) & (od["cp_flag"] == "C")) | ((od["F"] > od["K"]) & (od["cp_flag"] == "P"))]
+
+#     # add r to options
+#     od = vp.add_r_to_od_parallel(od, ZCY_curves)
+#     print("Data loaded")
+
+
+#     return od, returns_and_prices, od_raw
+
+
+
+from pathlib import Path
+import numpy as np
+import pandas as pd
+
+def load_clean_and_prepare_od_ticker(
+    ticker, valid_dates, ZCY_curves,
+    IV_type="od", safe_slow_IV=False
+):
+    # 1) Load + forward
     od, FW, returns_and_prices = load_od_FW_ticker(ticker, valid_dates)
-
-    # returns_and_prices = returns_and_prices[(returns_and_prices["open"] > 0) & (returns_and_prices["close"] > 0)]
-
-    # add forward (before cleaning such that od_raw has the forward rate, used in options trats for ATM options that might be slightly ITM)
     od = add_FW_to_od_ticker(od, FW)
 
-    # add IV to options (bid/ask/mid/om)
-    od["IV"] = vp.add_bid_mid_ask_IV(od, IV_type, safe_slow_IV = safe_slow_IV)
+    # 2) Add IV
+    od["IV"] = vp.add_bid_mid_ask_IV(od, IV_type, safe_slow_IV=safe_slow_IV)
     od[f"IV_{IV_type}"] = od["IV"]
 
-    # Intrinsic value
-    flag = np.where(od["cp_flag"] == 'C', 1, -1)  # now a numeric array
-    od["intrinsic"] = np.maximum(flag * (od["F"] - od["K"]), 0)
-    od["mid_intrinsic_diff"] = od["mid"] - od["intrinsic"]
-
+    # 3) Gem rå data
     od_raw = od.copy()
 
-    # clean data (should be looked upon)
+    # 4) Clean + fjern ITM
     od = clean_od_ticker(od)
+    od = od.loc[
+        ((od["F"] < od["K"]) & (od["cp_flag"] == "C")) |
+        ((od["F"] > od["K"]) & (od["cp_flag"] == "P"))
+    ]
 
-    # remove if ITM
-    od = od.loc[((od["F"] < od["K"]) & (od["cp_flag"] == "C")) | ((od["F"] > od["K"]) & (od["cp_flag"] == "P"))]
-
-    # add r to options
+    # 5) Add rente
     od = vp.add_r_to_od_parallel(od, ZCY_curves)
-    print("Data loaded")
 
+    # Mål1: relativ strike-afvigelse
+    od["rel_dev"] = ((od["K"] - od["F"]) / od["F"]).abs()
+
+    grp = ["date", "exdate", "cp_flag"]
+    # groupby-agg: kvantil af rel_dev og median(mid)
+    thr = (
+        od
+        .groupby(grp)
+        .agg(
+            thr_dev=("rel_dev", "median"), # q75_dev   = ("rel_dev", lambda x: x.quantile(0.50)),
+            median_mid=("mid", "median")
+        )
+        .reset_index()
+    )
+    # tærskel = max(thr_dev, 0.2)
+    thr["thr_dev"] = thr["thr_dev"].clip(lower=0.2)
+
+    # merge tilbage
+    od = od.merge(thr[[*grp, "thr_dev", "median_mid"]], on=grp, how="left")
+
+    # 6) Sæt flags
+    od["flag1"] = od["rel_dev"] >= od["thr_dev"]   # kigger otm optioner 
+    od["flag2"] = od["mid"] > od["median_mid"]*2   # er mid på disse større end median ?
+    od["remove"] = od["flag1"] & od["flag2"] 
+
+    # # 7) Gem debug
+    # debug_cols = [
+    #     "optionid", "date", "exdate", "cp_flag",
+    #     "F", "K", "mid", "rel_dev",
+    #     "thr_dev", "median_mid",
+    #     "flag1", "flag2", "remove"
+    # ]
+    # debug_dir = Path(load_clean_lib.dirs()["OptionMetrics"] / "Tickers" / "Debug")
+    # debug_dir.mkdir(parents=True, exist_ok=True)
+    # od[debug_cols].to_csv(debug_dir / f"debug_rel_dev_filter_{ticker}.csv", index=False)
+
+    # 8) Filtrér væk hvor remove==True
+    od = od.loc[~od["remove"]].copy()
+
+    # 9) Ryd op og returnér
+    od.drop(columns=["rel_dev", "median_mid", "thr_dev", "flag1", "flag2", "remove"], inplace=True)
+    
     return od, returns_and_prices, od_raw
+
+
+
 
 
 def high_low_swap_rates_ticker(summary_dly_df, od_rdy, n_points=200):
