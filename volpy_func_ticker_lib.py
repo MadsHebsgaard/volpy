@@ -31,10 +31,12 @@ def load_od_FW_ticker(ticker, valid_dates):
 
     # Load hvert dataset direkte
     od = vp.load_option_data(ticker_dir / "option data.csv", valid_dates)
-
-
     FW = vp.load_forward_price(ticker_dir / "forward price.csv")
     ret = vp.load_returns_and_price(ticker_dir / "returns and stock price.csv")
+
+    od["ticker"] = ticker
+    FW["ticker"] = ticker
+    ret["ticker"] = ticker
 
     return od, FW, ret
 
@@ -80,9 +82,80 @@ import logging
 # logging.debug(f"Input FW shape: {FW.shape if not FW.empty else 'empty'}")
 
 
+def filter_fw_outliers_sliding_window(FW):
+    """
+    For hver række i FW tjekker vi om forwardprice afviger > outlier_factor
+    fra både medianen over de forrige window_days og de følgende window_days.
+    """
+
+    outlier_factor = 5
+    window_days = 10
+
+
+    # daily medians pr date / group
+    daily_med = (
+        FW.groupby("date")["forwardprice"]
+          .median()
+          .sort_index()
+    )
+
+    # median of last 10 medians
+    prev_med = (
+        daily_med
+        .shift(1)
+        .rolling(window=window_days, min_periods=1)
+        .median()
+    )
+
+    # medians of next 10 medians
+    next_med = (
+        daily_med
+        .shift(-1)
+        .iloc[::-1]
+        .rolling(window=window_days, min_periods=1)
+        .median()
+        .iloc[::-1]
+    )
+
+    # merge medians on df 
+    med_df = pd.DataFrame({
+        "date": daily_med.index,
+        "prev_med": prev_med.values,
+        "next_med": next_med.values
+    })
+    merged = FW.merge(med_df, on="date", how="left")
+
+    # devations
+    merged["ratio_prev"] = merged["forwardprice"] / merged["prev_med"]
+    merged["ratio_next"] = merged["forwardprice"] / merged["next_med"]
+
+    # flagged if spike
+    low, high = 1/outlier_factor, outlier_factor
+    mask_outlier = (
+        ((merged["ratio_prev"] < low) | (merged["ratio_prev"] > high)) &
+        ((merged["ratio_next"] < low) | (merged["ratio_next"] > high))
+    )
+    merged["flag_outlier"] = mask_outlier.astype(int)
+
+    # # debug
+    # debug_dir = Path(load_clean_lib.dirs()["OptionMetrics"]) / "Tickers" / "Debug"
+    # debug_dir.mkdir(parents=True, exist_ok=True)
+    # merged.to_csv(debug_dir / "forward_outlier_flags.csv", index=False)
+
+    return merged.loc[merged["flag_outlier"] == 0].drop(
+        columns=["prev_med","next_med","ratio_prev","ratio_next","flag_outlier"]
+    )
+
+
+
 def add_FW_to_od_ticker(od, FW):
     """Interpolate forward prices, using neighboring dates if necessary."""
+
+    # 0) added cleaning in python
+    FW = filter_fw_outliers_sliding_window(FW)
+
     days_var = "c_days"
+
 
     # Handle empty FW input
     if FW.empty:
@@ -92,6 +165,9 @@ def add_FW_to_od_ticker(od, FW):
     # Convert all dates to Timestamps upfront
     FW["date"] = pd.to_datetime(FW["date"])
     od["date"] = pd.to_datetime(od["date"])
+
+    # 0) added cleaning in python
+    FW = filter_fw_outliers_sliding_window(FW)
 
     # Build date → (days_array, forward_array) mapping
     FW_grouped = {
@@ -112,50 +188,6 @@ def add_FW_to_od_ticker(od, FW):
         next_dates = [dt for dt in available_dates if dt > d]
         return next_dates[0] if next_dates else None
 
-    # def _inter_extrapolate_linear(xp, yp, x):
-    #     with np.errstate(divide='ignore', invalid='ignore'):
-    #         # Compute slopes at endpoints
-    #         if len(yp) >= 2:
-    #             m_start = (yp[1] - yp[0]) / (xp[1] - xp[0]) if xp[1] != xp[0] else 0
-    #             m_end = (yp[-1] - yp[-2]) / (xp[-1] - xp[-2]) if xp[-1] != xp[-2] else 0
-    #         else:
-    #             m_start = m_end = 0
-    #         return np.interp(
-    #             x, xp, yp,
-    #             left =yp[0]  + (x - xp[0])  * m_start,
-    #             right=yp[-1] + (x - xp[-1]) * m_end)
-
-    # def _inter_extrapolate_linear(xp, yp, x):
-    #     logging.debug(f"Input xp: {xp}, yp: {yp}, x: {x}")
-    #
-    #     if len(xp) == 0 or len(yp) == 0:
-    #         logging.warning("Empty xp or yp array")
-    #         return np.full_like(x, np.nan)
-    #
-    #     sort_indices = np.argsort(xp)
-    #     xp = xp[sort_indices]
-    #     yp = yp[sort_indices]
-    #     logging.debug(f"Sorted xp: {xp}, yp: {yp}")
-    #
-    #     if len(yp) == 1:
-    #         logging.debug("Single-point extrapolation")
-    #         return np.full_like(x, yp[0])
-    #
-    #     with np.errstate(divide='ignore', invalid='ignore'):
-    #         m_start = (yp[1] - yp[0]) / (xp[1] - xp[0]) if (xp[1] != xp[0]) else 0.0
-    #         m_end = (yp[-1] - yp[-2]) / (xp[-1] - xp[-2]) if (xp[-1] != xp[-2]) else 0.0
-    #
-    #     m_start = np.nan_to_num(m_start, nan=0.0, posinf=0.0, neginf=0.0)
-    #     m_end = np.nan_to_num(m_end, nan=0.0, posinf=0.0, neginf=0.0)
-    #     logging.debug(f"Slopes: m_start={m_start}, m_end={m_end}")
-    #
-    #     result = np.interp(
-    #         x, xp, yp,
-    #         left=yp[0] + (x - xp[0]) * m_start,
-    #         right=yp[-1] + (x - xp[-1]) * m_end
-    #     )
-    #     logging.debug(f"Result: {result}")
-    #     return result
 
     def _inter_extrapolate_linear(xp, yp, x):
         x = np.asarray(x)
@@ -196,6 +228,28 @@ def add_FW_to_od_ticker(od, FW):
         result[mask_right] = yp[-1] + (x[mask_right] - xp[-1]) * m_end
 
         return result
+
+
+    # def _extrapolate_linear(xp, yp, x):
+    #     # # xp og yp må nu have min. 2 punkter efter rens
+    #     # if len(xp) < 2:
+    #     #     # returnér NaN
+    #     #     return np.full_like(x, np.nan, dtype=float)
+    #
+    #     # compute end‐slopes
+    #     m0 = (yp[1] - yp[0]) / (xp[1] - xp[0])
+    #     m1 = (yp[-1] - yp[-2]) / (xp[-1] - xp[-2])
+    #     y = np.empty_like(x, dtype=float)
+    #     # in‐range
+    #     mask = (x >= xp[0]) & (x <= xp[-1])
+    #     y[mask] = np.interp(x[mask], xp, yp)
+    #     # left‐extrapolate
+    #     left = x < xp[0]
+    #     y[left] = yp[0] + (x[left] - xp[0]) * m0
+    #     # right‐extrapolate
+    #     right = x > xp[-1]
+    #     y[right] = yp[-1] + (x[right] - xp[-1]) * m1
+    #     return y
 
 
     def _interpolate_per_date(group):

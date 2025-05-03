@@ -89,6 +89,7 @@ def fetch_options_data_per_ticker_days_iv_flag(
                 chunk = db.raw_sql(sql_chunk, date_cols=["date", "exdate"])
 
                 if not chunk.empty:
+                    chunk["ticker"] = ticker
                     mode = 'w' if first_chunk else 'a'
                     chunk.to_csv(output_file, index=False, mode=mode, header=first_chunk)
                     first_chunk = False
@@ -136,7 +137,7 @@ def fetch_forward_prices_per_ticker(db, begdate, enddate, tickers_secids, base_d
                     LEFT JOIN optionm.securd1 s ON f.secid = s.secid
                     WHERE f.date BETWEEN '{begdate}' AND '{enddate}'
                       AND f.secid = {secid}
-                      AND f.forwardprice >= 1
+                      AND f.forwardprice > 0 
                     LIMIT {chunk_size} OFFSET {offset}
                 """
 
@@ -144,6 +145,8 @@ def fetch_forward_prices_per_ticker(db, begdate, enddate, tickers_secids, base_d
 
                 if chunk.empty:
                     break  # Done with this secid
+                
+                chunk["ticker"] = ticker
 
                 if first_chunk:
                     chunk.to_csv(output_file, index=False, mode='w')
@@ -204,6 +207,7 @@ def fetch_stock_returns_per_ticker(db, begdate, enddate, tickers_permnos, base_d
             df = db.raw_sql(query, date_cols=["date"])
 
             if not df.empty:
+                df["ticker"] = ticker
                 df.sort_values(by=["ticker", "date"], inplace=True)
                 df.to_csv(output_file, index=False)
 
