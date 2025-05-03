@@ -332,7 +332,7 @@ def ticker_to_vol_symbol(s):
 
 
 
-def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ", "vol_indexes"]):
+def download_factor_df(Factor_list=["FF5", "SPX", "UMD", "BAB", "QMJ", "vol_indexes"]):
     import pandas as pd
     import requests
     from io import BytesIO
@@ -361,6 +361,25 @@ def download_factor_df(Factor_list=["FF5", "UMD", "BAB", "QMJ", "vol_indexes"]):
     df.set_index('date', inplace=True)
     df = df.apply(pd.to_numeric, errors='coerce')
     df = df / 100
+
+    if "SPX" in Factor_list:
+        import volpy_func_ticker_lib as vtp
+        from pathlib import Path
+
+        # fix any Bloomberg‐OM quirks, then point to your SPX CSV folder
+        vtp.fix_index_returns_bloomberg_OM(["SPX"])
+        SPX_dir = Option_metrics_path_from_profile() / "Tickers" / "Input" / "SPX"
+
+        # read in the SPX returns file
+        SPX_df = pd.read_csv(SPX_dir / "returns and stock price.csv", usecols=["date", "return"])
+        SPX_df['date'] = pd.to_datetime(SPX_df['date'])
+        SPX_df.rename(columns={'return': 'SPX'}, inplace=True)
+        SPX_df.set_index('date', inplace=True)
+
+        # join the SPX series into your main factor df
+        df = df.join(SPX_df['SPX'], how='inner')
+        df["SPX+RF"] = df["SPX"]
+        df["SPX"] = df["SPX+RF"] - df["RF"]
 
     if "UMD" in Factor_list:
         # Load Momentum (UMD) Daily Data

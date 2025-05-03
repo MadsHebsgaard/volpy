@@ -419,18 +419,25 @@ def _process_one_ticker(
     base_dir: Path,
     IV_type: str,
     safe_slow_IV: bool,
-) -> None:
+) -> list[str]:
     """
     Load, analyze, and save results for a single ticker.
     Cleans up large objects at the end to keep memory usage in check.
     """
+    import traceback
+
+    logs: list[str] = []
+    def L(*msgs):
+        # coerce everything to str and join with spaces
+        logs.append(" ".join(str(m) for m in msgs))
+
     tickers_dir   = base_dir / "Tickers"
     out_dir       = tickers_dir / "Output" / days_type() / ticker
     sum1_dir      = tickers_dir / "SumAndOrpy" / days_type() / "sum1"
 
     # skip if already done
     if out_dir.exists():
-        return
+        return logs
 
     try:
         # 1) Load & prepare
@@ -447,22 +454,20 @@ def _process_one_ticker(
         # 3) Interpolate missing swaps/returns, reset index for CSV
         summary_dly_df = vp.interpolate_swaps_and_returns(summary_dly_df).reset_index()
 
-        # 4.0) Ensure directories exist
         out_dir.mkdir(parents=True, exist_ok=True)
         sum1_dir.mkdir(parents=True, exist_ok=True)
 
-        # 4.1) Write out CSVs
         summary_dly_df.to_csv(sum1_dir / f"{ticker}.csv", index=False)
         summary_dly_df.to_csv(out_dir / "sum1_df.csv",    index=False)
         od_raw.to_csv(       out_dir / "od_raw.csv",      index=False)
-        od_rdy.to_csv(           out_dir / "od_rdy.csv",      index=False)
-
+        od_rdy.to_csv(           out_dir / "od_rdy.csv",  index=False)
     finally:
         # Explicitly delete large objects and run garbage collector
         for obj in ("od", "returns_and_prices", "od_raw", "summary_dly_df", "od_rdy"):
             if obj in locals():
                 del locals()[obj]
         gc.collect()
+        return logs
 
 
 def load_analyze_create_swap_ticker_parallel(
@@ -513,7 +518,10 @@ def load_analyze_create_swap_ticker_parallel(
         for fut in as_completed(futures):
             tkr = futures[fut]
             try:
-                fut.result()
+                logs = fut.result()
+                for line in logs:
+                    print(line)  # now you _will_ see them
+
                 print(f"[✓] {tkr}")
             except Exception as e:
                 print(f"[✗] {tkr} failed: {e}")
@@ -855,7 +863,9 @@ def concat_ticker_datasets(
     if not frames:
         return pd.DataFrame()
 
-    return pd.concat(frames, ignore_index=True)
+    df_merged = pd.concat(frames, ignore_index=True)
+    # df_merged = df_merged.dropna(subset=["SW_0_30"])
+    return df_merged
 
 
 def create_csv_from_folder(df_name_list = ["sum1", "sum2", "orpy"]):

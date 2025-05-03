@@ -172,14 +172,12 @@ def table_dataset_list_strike_count(df, name, width_scale=0.75):
     return table_df
 
 
-def table_dataset_list_strike_count_pages(df, name, width_scale=0.75, sort_types = False):
-    if name == "VIX":
-        df = df[df["ticker"] != "TLT"]
+def table_dataset_list_strike_count_pages(df, name, width_scale=0.75):
 
-    df_nonan = df[df["SW_0_30"].notna()]
+    df = df.dropna(subset=["RV", "SW_0_30"]).copy()
 
     table_df = (
-        df_nonan
+        df
         .groupby("ticker")
         .agg(
             Starting_date=("date", "min"),
@@ -192,35 +190,7 @@ def table_dataset_list_strike_count_pages(df, name, width_scale=0.75, sort_types
         )
         .reset_index()
     )
-    # assign group: 0=index, 1=ETF, 2=other
-    idx_CAM_set = set(vp.Index_tickers)
-    etf_set = set(vp.ETF_tickers)
-    cols = table_df.columns.copy()
-
-    if sort_types:
-        table_df["group"] = table_df["ticker"].map(
-            lambda t: 0 if t in idx_CAM_set else (1 if t in etf_set else 2)
-        )
-
-        # add asset_class (0–4) for sorting
-        table_df["asset_class"] = table_df["ticker"].map(vp.ticker_to_asset_code)
-
-        # sort by group (lowest first), then asset_class (lowest first), then NK (highest first)
-        table_df = (
-            table_df
-            .sort_values(
-                ["asset_class", "group", "NK"],
-                ascending=[True, True, False]
-            )
-            .reset_index(drop=True)
-        )
-        table_df = table_df[cols]
-    else:
-        table_df = (
-            table_df
-            .sort_values("NK", ascending=False)
-            .reset_index(drop=True)
-        )
+    table_df = sort_table_df(table_df, df, name)
 
     table_df.insert(0, "No.", table_df.index + 1)
 
@@ -306,236 +276,66 @@ def table_dataset_list_strike_count_pages(df, name, width_scale=0.75, sort_types
         f.write(full_table)
     return table_df
 
+sort_map = {
+    "VIX":      False,
+    "Cross-AM": True,
+    "OEX":      True,
+    "Liquid":   True,
+    "CarrWu":   True,
+}
 
+def sort_table_df(table_df, sum_df, name):
+    """
+    Given a DataFrame with an 'NK' column and a 'ticker' column,
+    optionally sorts by asset class & group (Index→ETF→Other) then NK;
+    otherwise just by NK descending.
+    Drops helper columns and preserves original column order.
+    """
 
+    df = table_df.copy()
+    idx_CAM_set = set(vp.Index_tickers)
+    etf_set     = set(vp.ETF_tickers)
+    orig_cols   = df.columns.tolist()
 
+    # 1) compute temp-NK
+    means = sum_df.groupby("ticker")["#K"].mean()
+    df["NK_tmp"] = df["ticker"].map(means)
 
-
-def table_dataset_list_strike_count_pages_3(df, name, width_scale=0.75):
-    if name == "VIX":
-        df = df[df["ticker"] != "TLT"]
-
-    df_nonan = df[df["SW_0_30"].notna()]
-
-    table_df = (
-        df_nonan
-        .groupby("ticker")
-        .agg(
-            Starting_date=("date", "min"),
-            Ending_date=("date", "max"),
-            N=("date", "count"),
-            NK=("#K", "mean"),
-            Q1_K=("#K", lambda x: x.quantile(0.01)),
-            Q5_K=("#K", lambda x: x.quantile(0.05)),
-            Q10_K=("#K", lambda x: x.quantile(0.10))
+    if sort_map[name]:
+        # assign group: 0=Index, 1=ETF, 2=Other
+        df["group"]       = df["ticker"].map(
+            lambda t: 0 if t in idx_CAM_set
+                      else (1 if t in etf_set else 2)
         )
-        .reset_index()
-    )
+        # add asset_class (0–4) for sorting
+        df["asset_class"] = df["ticker"].map(vp.ticker_to_asset_code)
 
-    table_df = table_df.sort_values("NK", ascending=False).reset_index(drop=True)
-
-    # Insert row-number column
-    table_df.insert(0, "No.", table_df.index + 1)
-
-    # Format dates and types
-    table_df["Starting_date"] = pd.to_datetime(table_df["Starting_date"]).dt.strftime("%d-%b-%Y")
-    table_df["Ending_date"] = pd.to_datetime(table_df["Ending_date"]).dt.strftime("%d-%b-%Y")
-    table_df["N"] = table_df["N"].astype(int)
-    table_df["NK"] = table_df["NK"].round(1)
-    table_df["Q1_K"] = table_df["Q1_K"].round(1)
-    table_df["Q5_K"] = table_df["Q5_K"].round(1)
-    table_df["Q10_K"] = table_df["Q10_K"].round(1)
-
-    # Get raw LaTeX
-    raw = table_df.to_latex(
-        index=False,
-        header=False,
-        float_format="%.1f"
-    )
-
-    # Extract data rows
-    lines = raw.splitlines()
-    start = next(i for i, l in enumerate(lines) if l.strip() == r'\midrule') + 1
-    end = next(i for i, l in enumerate(lines) if l.strip() == r'\bottomrule')
-    body = "\n".join(lines[start:end])
-
-    num_rows = len(table_df)
-
-    if num_rows > 50:
-        # Longtable version with page-spanning support
-        print("xD")
-        full_table = (
-            r"\begin{center}" + "\n"
-            rf"\scalebox{{{width_scale}}}{{" + "\n"
-            r"\renewcommand{\arraystretch}{1}" + "\n"
-            r"\begin{longtable}{rlllrrrrr}" + "\n"
-            rf"\caption{{List of stocks and stock indexes in the {name} sample}} \\" + "\n"
-            rf"\label{{tab:data_summary_{name}}} \\" + "\n"
-            r"\toprule" + "\n"
-            r"No. & Ticker & Start Date & End Date & Days & \multicolumn{4}{c}{Strike Count} \\" + "\n"
-            r"\cmidrule(lr){6-9}" + "\n"
-            r" &  &  &  &  & Mean & 1\% & 5\% & 10\% \\" + "\n"
-            r"\midrule" + "\n"
-            r"\endfirsthead" + "\n\n"
-            r"\multicolumn{9}{c}{{\tablename\ \thetable{} -- Continued from previous page}} \\" + "\n"
-            r"\toprule" + "\n"
-            r"No. & Ticker & Start Date & End Date & Days & \multicolumn{4}{c}{Strike Count} \\" + "\n"
-            r"\cmidrule(lr){6-9}" + "\n"
-            r" &  &  &  &  & Mean & 1\% & 5\% & 10\% \\" + "\n"
-            r"\midrule" + "\n"
-            r"\endhead" + "\n\n"
-            r"\midrule" + "\n"
-            r"\multicolumn{9}{r}{{Continued on next page}} \\" + "\n"
-            r"\endfoot" + "\n\n"
-            r"\bottomrule" + "\n"
-            r"\endlastfoot" + "\n\n"
-            + body + "\n"
-            r"\end{longtable}" + "\n"
-            r"}" + "\n"
-            r"\end{center}"
-        )
-    else:
-        # Regular table version
-        full_table = (
-            r"\begin{table}[ht]" + "\n"
-            r"\centering" + "\n"
-            rf"\scalebox{{{width_scale}}}{{" + "\n"
-            r"\renewcommand{\arraystretch}{1}" + "\n"
-            r"\begin{tabular}{rlllrrrrr}" + "\n"
-            r"\toprule" + "\n"
-            r"No. & Ticker & Start Date & End Date & Days & \multicolumn{4}{c}{Strike Count} \\" + "\n"
-            r"\cmidrule(lr){6-9}" + "\n"
-            r" &  &  &  &  & Mean & 1\% & 5\% & 10\% \\" + "\n"
-            r"\midrule" + "\n"
-            + body + "\n"
-            r"\bottomrule" + "\n"
-            r"\end{tabular}" + "\n"
-            r"}" + "\n"
-            rf"\caption{{List of stocks and stock indexes in the {name} sample}}" + "\n"
-            rf"\label{{tab:data_summary_{name}}}" + "\n"
-            r"\end{table}"
-        )
-    out_path = f'figures/summary/data_summary_table_{name}.tex'
-    with open(out_path, 'w') as f:
-        f.write(full_table)
-
-    return table_df
-
-
-def table_dataset_list_strike_count_pages_1(df, name, width_scale=0.75):
-    if name == "VIX":
-        df = df[df["ticker"] != "TLT"]
-
-    df_nonan = df[df["SW_0_30"].notna()]
-
-    table_df = (
-        df_nonan
-        .groupby("ticker")
-        .agg(
-            Starting_date=("date", "min"),
-            Ending_date  =("date", "max"),
-            N            =("date", "count"),
-            NK           =("#K",   "mean"),
-            Q1_K         =("#K", lambda x: x.quantile(0.01)),
-            Q5_K         =("#K", lambda x: x.quantile(0.05)),
-            Q10_K        =("#K", lambda x: x.quantile(0.10))
-        )
-        .reset_index()
-    )
-
-    table_df = table_df.sort_values("NK", ascending=False).reset_index(drop=True)
-
-    # Insert row-number column
-    table_df.insert(0, "No.", table_df.index + 1)
-
-    # Format dates and types
-    table_df["Starting_date"] = pd.to_datetime(table_df["Starting_date"]).dt.strftime("%d-%b-%Y")
-    table_df["Ending_date"]   = pd.to_datetime(table_df["Ending_date"]).dt.strftime("%d-%b-%Y")
-    table_df["N"]    = table_df["N"].astype(int)
-    table_df["NK"]   = table_df["NK"].astype(float)
-    table_df["Q1_K"] = table_df["Q1_K"].astype(float)
-    table_df["Q5_K"] = table_df["Q5_K"].astype(float)
-    table_df["Q10_K"]= table_df["Q10_K"].astype(float)
-
-    # Get raw LaTeX
-    raw = table_df.to_latex(
-        index=False,
-        header=False,
-        float_format="%.1f"
-    )
-
-    # Extract data rows
-    lines = raw.splitlines()
-    start = next(i for i, l in enumerate(lines) if l.strip() == r'\midrule') + 1
-    end   = next(i for i, l in enumerate(lines) if l.strip() == r'\bottomrule')
-    body  = "\n".join(lines[start:end])
-
-    # Determine if splitting is needed
-    num_rows = len(table_df)
-    if num_rows > 50:
-        body_lines = [line for line in body.split('\n') if line.strip() != '']
-        chunks = [body_lines[i:i+50] for i in range(0, len(body_lines), 50)]
-        tables = []
-        for i, chunk in enumerate(chunks):
-            part_body = '\n'.join(chunk)
-            part_caption = f"List of stocks and stock indexes in the {name} sample (Part {i+1})."
-            part_label = f"tab:data_summary_table_{name}_part{i+1}"
-            part_table = (
-                r"\begin{table}[ht]" "\n"
-                r"\centering" "\n"
-                r"\renewcommand{\arraystretch}{1}" "\n"
-                rf"\adjustbox{{max width={width_scale}\textwidth}}{{" "\n"
-                r"\begin{tabular}{rlllrrrrr}" "\n"
-                r"\toprule" "\n"
-                r"No.\ & Ticker & Starting date & Ending date & Days & \multicolumn{4}{c}{Number of strikes} \\" "\n"
-                r"\cmidrule(lr){6-9}" "\n"
-                r" &  &  &  &  & Mean & 1\% & 5\% & 10\% \\" "\n"
-                r"\midrule" "\n"
-                + part_body + "\n"
-                r"\bottomrule" "\n"
-                r"\end{tabular}" "\n"
-                r"}" "\n"
-                rf"\caption{{{part_caption}}}" "\n"
-                rf"\label{{{part_label}}}" "\n"
-                r"\end{table}"
+        # sort by asset_class ↑, group ↑, NK_tmp ↓
+        df = (
+            df
+            .sort_values(
+                ["asset_class", "group", "NK_tmp"],
+                ascending=[True, True, False]
             )
-            tables.append(part_table)
-        full_table = '\n\\clearpage\n\n'.join(tables)
+            .reset_index(drop=True)
+        )
+        # restore only the original columns (dropping helpers)
+        df = df[orig_cols]
     else:
-        full_table = (
-            r"\begin{table}[ht]" "\n"
-            r"\centering" "\n"
-            r"\renewcommand{\arraystretch}{1}" "\n"
-            rf"\adjustbox{{max width={width_scale}\textwidth}}{{" "\n"
-            r"\begin{tabular}{rlllrrrrr}" "\n"
-            r"\toprule" "\n"
-            r"No.\ & Ticker & Starting date & Ending date & Days & \multicolumn{4}{c}{Number of strikes} \\" "\n"
-            r"\cmidrule(lr){6-9}" "\n"
-            r" &  &  &  &  & Mean & 1\% & 5\% & 10\% \\" "\n"
-            r"\midrule" "\n"
-            + body + "\n"
-            r"\bottomrule" "\n"
-            r"\end{tabular}" "\n"
-            r"}" "\n"
-            rf"\caption{{List of stocks and stock indexes in the {name} sample.}}" "\n"
-            rf"\label{{tab:data_summary_table_{name}}}" "\n"
-            r"\end{table}"
+        df = (
+            df
+            .sort_values("NK_tmp", ascending=False)
+            .reset_index(drop=True)
         )
 
-    out_path = f'figures/summary/data_summary_table_{name}.tex'
-    with open(out_path, 'w') as f:
-        f.write(full_table)
-
-    return table_df
-
-
+    return df
 
 
 
 import pandas as pd
 
-def CarrWu2009_table_2(summary_dly_df, name):
-    df = summary_dly_df
+def CarrWu2009_table_2(df, name):
+    df = df.dropna(subset=["RV", "SW_0_30"]).copy()
 
     def compute_stats(sub_df, col):
         scaled = sub_df[col] * 100
@@ -566,13 +366,8 @@ def CarrWu2009_table_2(summary_dly_df, name):
     # merge panels
     out = pd.merge(df_rv, df_sw, on="ticker", how="inner")
 
-    # 1) compute NK and merge
-    nk = df.groupby("ticker")["#K"].mean().rename("NK")
-    out = out.merge(nk, on="ticker")
-
-    # 2) sort by NK desc, then drop the column
-    out = out.sort_values("NK", ascending=False).reset_index(drop=True)
-    out = out.drop(columns="NK")
+    # sort
+    out = sort_table_df(out, df, name)
 
     # 3) generate & save LaTeX
     latex = CarrWu2009_table_2_latex_v2(out, name)   # now returns a string
@@ -732,15 +527,14 @@ def newey_west_t_stat(series, lag=30):
     return x_bar / nw_se if nw_se > 0 else np.nan
 
 
-def CarrWu2009_table_3(summary_dly_df, name):
+def CarrWu2009_table_3(df, name):
     # ensure output dir
     os.makedirs("figures/Analysis", exist_ok=True)
 
     # 1) Prep the data
-    df = summary_dly_df
-    df_nonan = df.dropna(subset=["RV", "SW_0_30"]).copy()
-    df_nonan["diff"]    = df_nonan["RV"] - df_nonan["SW_0_30"]
-    df_nonan["lnratio"] = np.log(df_nonan["RV"]) - np.log(df_nonan["SW_0_30"])
+    df = df.dropna(subset=["RV", "SW_0_30"]).copy()
+    df["diff"]    = df["RV"] - df["SW_0_30"]
+    df["lnratio"] = np.log(df["RV"]) - np.log(df["SW_0_30"])
 
     # 1) add this helper right after newey_west_t_stat
     def newey_west_std(series, lag=30):
@@ -782,7 +576,7 @@ def CarrWu2009_table_3(summary_dly_df, name):
 
     # Panel A: (RV - SW_0_30) × 100
     df_diff = (
-        df_nonan
+        df
         .groupby("ticker", group_keys=False)
         .apply(lambda g: compute_stats(g["diff"] * 100))
         .reset_index()
@@ -796,7 +590,7 @@ def CarrWu2009_table_3(summary_dly_df, name):
 
     # Panel B: ln(RV / SW_0_30)
     df_ln = (
-        df_nonan
+        df
         .groupby("ticker", group_keys=False)
         .apply(lambda g: compute_stats(g["lnratio"]))
         .reset_index()
@@ -809,9 +603,10 @@ def CarrWu2009_table_3(summary_dly_df, name):
     df_ln = df_ln.drop(columns=["NW_std"])
 
 
-    # Merge & order
+    # Merge & sort
     out = pd.merge(df_diff, df_ln, on="ticker", how="inner")
-    out = CarrWu_order(out)
+    out = sort_table_df(out, df, name)
+
 
     # 3) Generate LaTeX and write file
     latex = CarrWu2009_table_3_latex_v2(out, name)
@@ -1116,3 +911,37 @@ def generate_latex_for_pairs(df):
     # Write the LaTeX to the file
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(latex))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

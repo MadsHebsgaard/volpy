@@ -669,6 +669,8 @@ def add_bid_mid_ask_IV(od, IV_type, safe_slow_IV = False):
 
 
 def process_group_activity_summary(group):
+    group = group.copy()
+
     days_var = days_type() + "days"  # fx "t_days" eller "c_days"
     if days_var == "t_days":
         target_days = 21
@@ -676,12 +678,10 @@ def process_group_activity_summary(group):
         target_days = 30
 
     if days_type() == "t_" and clean_t_days():
-        x = 1
+        t_bool = 1
     else:
-        x = 0
+        t_bool = 0
 
-    current_date = group["date"].iloc[0]
-    current_ticker = group["ticker"].iloc[0]
     summary = {}
 
     # Initialiser nye flagkolonner
@@ -698,28 +698,47 @@ def process_group_activity_summary(group):
         summary["Inactive reason"] = "unique(_days) < 2"
         return group, summary
 
-    # Inaktiv hvis den mindste dag er for stor, med justering baseret på x
-    if unique_days[0] > 90 - x * 90 * 0.3:
-        summary["Active"] = False
-        summary["Inactive reason"] = "min days > 90"
-        return group, summary
-
     # Vælg de to dage, der skal bruges – opdel unikke dage i dem under og over 30 dage
-    days_below_target = unique_days[(unique_days <= target_days) & (unique_days > 8)]
-    days_above_target = unique_days[unique_days > target_days]
-    
+    days_below_target = unique_days[(unique_days <= target_days) & (unique_days > 8 - t_bool*3)] # bør være 5 hvis handelsdage
+    days_above_target = unique_days[unique_days >= target_days]
+
+    low_day = None
+    high_day = None
     if len(days_below_target) > 0 and len(days_above_target) > 0:
-        low_2_days = [max(days_below_target), min(days_above_target)]
+        # 1) Find low_day: tættest på cutoff under target_days
+        low_day = None
+        for day in sorted(days_below_target, reverse=True):
+            if group.loc[group[days_var] == day, "K"].dropna().nunique() >= 3:
+                low_day = day
+                break
+
+        # 2) Find high_day: tættest på cutoff over target_days
+        high_day = None
+        for day in sorted(days_above_target):
+            if group.loc[group[days_var] == day, "K"].dropna().nunique() >= 3:
+                high_day = day
+                break
+
     elif len(days_below_target) >= 2:
         low_2_days = list(days_below_target[-2:])
+        low_day = low_2_days[0]
+        high_day = low_2_days[1]
+
     elif len(days_above_target) >= 2:
         low_2_days = list(days_above_target[:2])
-    
-    if len(unique_days) < 3 and unique_days[0] <= 8:
+        low_day = low_2_days[0]
+        high_day = low_2_days[1]
+
+    # if len(unique_days) < 3 and unique_days[0] <= 8:
+    #     summary["Active"] = False
+    #     summary["Inactive reason"] = "min days <= 8 & len < 3"
+    #     return group, summary
+
+    # Inaktiv hvis den mindste dag er for stor, med justering baseret på x
+    if low_day > 90 - t_bool * 90 * 0.3:
         summary["Active"] = False
-        summary["Inactive reason"] = "min days <= 8 & len < 3"
-        return group, summary 
-    
+        summary["Inactive reason"] = f"min days > {3*target_days}"
+        return group, summary
 
     # Sørg for at 'K' er numerisk
     group["K"] = pd.to_numeric(group["K"], errors="coerce")
@@ -727,41 +746,6 @@ def process_group_activity_summary(group):
     k_per_ex = group.groupby(days_var)["K"].nunique()
     # Gem gennemsnittet
     summary["#K_before_filter"] = k_per_ex.mean()
-
-
-    summary["low days"] = low_2_days[0]
-    summary["high days"] = low_2_days[1]
-
-    # # Check unikke strike-antals for de valgte dage; kræv mindst 3
-    # active = True
-    # for day, label in zip(low_2_days, ["low", "high"]):
-    #     num_strikes = group.loc[group[days_var] == day, "K"].nunique()
-    #     summary[f"{label} #K"] = num_strikes
-    #     if num_strikes < 3:
-    #         active = False
-    #         summary["Active"] = False
-    #         summary["Inactive reason"] = "unique(K) < 3"
-    # summary[f"#K"] = (summary[f"low #K"] + summary[f"high #K"]) / 2
-    # if not active:
-    #     return group, summary
-
-
-    # Sørg for K er numerisk
-    group["K"] = pd.to_numeric(group["K"], errors="coerce")
-
-    # 1) Find low_day: tættest på cutoff under target_days
-    low_day = None
-    for day in sorted(days_below_target, reverse=True):
-        if group.loc[group[days_var] == day, "K"].dropna().nunique() >= 3:
-            low_day = day
-            break
-
-    # 2) Find high_day: tættest på cutoff over target_days
-    high_day = None
-    for day in sorted(days_above_target):
-        if group.loc[group[days_var] == day, "K"].dropna().nunique() >= 3:
-            high_day = day
-            break
 
     # 3) Brug dem hvis begge fundet
     if low_day is not None and high_day is not None:
@@ -1003,7 +987,7 @@ def interpolate_swaps_and_returns(summary_dly_df):
     summary_dly_df["SW_m1_29"] = summary_dly_df.groupby("ticker")["SW_0_30"].shift(1)
 
     #discount factor
-    summary_dly_df["discount_factor_30d"] = 1 / (1 + summary_dly_df["RF"])**20
+    summary_dly_df["discount_factor_30d"] = 1 / (1 + summary_dly_df["RF"])**(20)
 
     # Casflow version baseret på markedsværdi af en daglig (-short) swap = long
     summary_dly_df["CF_30_SW_day"] = - (
@@ -1012,7 +996,8 @@ def interpolate_swaps_and_returns(summary_dly_df):
         - summary_dly_df["squared_return"] * 252 * 1 / T  # realiseret variabllt ben
     )  * summary_dly_df["discount_factor_30d"]  # diskonteres
 
-    summary_dly_df["r_30_SW_day"] = summary_dly_df["CF_30_SW_day"] / summary_dly_df["SW_m1_29"].shift(1).rolling(window=21).mean()
+    avg_sw = summary_dly_df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
+    summary_dly_df["r_30_SW_day"] = summary_dly_df["CF_30_SW_day"] / avg_sw
 
     return summary_dly_df
 
@@ -1615,18 +1600,16 @@ def plot_returns(df, sgy_common, sgy_names, factors):
     for factor in factors:
         plt.plot(df["date"], np.cumsum(df[f"{factor}"]), label=rf"{factor}", alpha=0.8)
 
-    x_SW_dly = df["CF_30_SW_day"]
-    plt.plot(df["date"], np.cumsum(x_SW_dly), label = "Swap day")
+    plt.plot(df["date"], np.cumsum(df["CF_30_SW_day"]), label = "Swap day")
 
-    x_SW_dly = df["r_30_SW_day"]
-    plt.plot(df["date"], np.cumsum(x_SW_dly), label = "Swap day return")
+    plt.plot(df["date"], np.cumsum(df["r_30_SW_day"]), label = "Swap day return")
 
     plt.grid()
     plt.legend()
     plt.show()
 
 # missing ticker
-def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strangle_15%", "call_ATM", "put_ATM"], factors=['Mkt', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF'], vol_index = True, sign=True, scale=True, plot = False, ticker_list = None, extra_columns = []):
+def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strangle_15%", "call_ATM", "put_ATM"], factors=['Mkt', 'SPX', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF'], vol_index = False, sign=True, scale=True, plot = False, ticker_list = None, extra_columns = []):
     if sgy_names is None:
         sgy_names = [col.replace(sgy_common, "") for col in df.columns if sgy_common in col]
 
@@ -2333,6 +2316,11 @@ def dirs_to_list():
     subdirs    = [p.name for p in ticker_dir.iterdir() if p.is_dir()]
     return subdirs
 
+
+
+
+
+# np.array(vp.dirs_to_list())
 
 
 # removed tickers = ["TLT", "SHY", "CEW"] (TLT removed from VIX and Cross-AM, SHY and CEW removed from Cross-AM)
