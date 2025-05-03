@@ -180,19 +180,28 @@ def fetch_stock_returns_per_ticker(db, begdate, enddate, tickers_permnos, base_d
 
             # Hent data for PERMNO
             query = f"""
-                SELECT d.permno, n.ticker, n.cusip, n.comnam as issuer,
-                       d.date, d.bidlo as open, d.prc as close, d.ret as return
-                FROM crsp.dsf d
-                LEFT JOIN crsp.dsenames n ON d.permno = n.permno
-                WHERE d.date BETWEEN '{begdate}' AND '{enddate_extended}'
-                  AND n.namedt <= d.date AND d.date <= n.nameendt
-                  AND d.permno = {permno}
+                WITH firm_info AS (
+                    SELECT d.permno, d.date, d.bidlo AS open, d.prc AS close, d.ret AS return,
+                        FIRST_VALUE(n.ticker) OVER w AS ticker,
+                        FIRST_VALUE(n.cusip) OVER w AS cusip,
+                        FIRST_VALUE(n.comnam) OVER w AS issuer
+                    FROM crsp.dsf d
+                    LEFT JOIN crsp.dsenames n
+                    ON d.permno = n.permno
+                    AND n.namedt <= d.date AND d.date <= n.nameendt
+                    WHERE d.permno = {permno}
+                    AND d.date BETWEEN '{begdate}' AND '{enddate_extended}'
+                    WINDOW w AS (
+                        PARTITION BY d.permno, d.date
+                        ORDER BY n.namedt DESC
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+                    )
+                )
+                SELECT DISTINCT permno, date, open, close, return, ticker, cusip, issuer
+                FROM firm_info
             """
 
             df = db.raw_sql(query, date_cols=["date"])
-
-            # Begræns til korrekt ticker (hvis flere knyttet til samme permno)
-            df = df[df["ticker"].str.upper() == ticker.upper()]
 
             if not df.empty:
                 df.sort_values(by=["ticker", "date"], inplace=True)
@@ -313,7 +322,7 @@ def fetch_zerocoupons(db, begdate, enddate, csv_path):
 
 def fetch_wrds_data_per_ticker(db, tickers, begdate="1996-01-01", enddate="2024-12-31",
                                 data_types=["O", "F", "S", "Z"], chunk_size=1000000,
-                                chunk_days=30):
+                                chunk_days=30, overwrite = False):
 
     tickers = list(set(tickers))  # fjern duplikater
 
@@ -336,7 +345,7 @@ def fetch_wrds_data_per_ticker(db, tickers, begdate="1996-01-01", enddate="2024-
     for ticker in tickers:
         t_upper = ticker.strip().upper()
         ticker_path = base_dir / "Tickers" / "Input" / t_upper
-        if ticker_path.exists():
+        if ticker_path.exists() and not overwrite:
             skipped_tickers.append(t_upper)
         else:
             tickers_to_fetch.append(t_upper)
