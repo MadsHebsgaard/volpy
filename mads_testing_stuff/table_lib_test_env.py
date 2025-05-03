@@ -15,7 +15,10 @@ def capm_beta_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
         gA = g.dropna(subset=[y_var, "SPX"])
         if len(gA) > 0:
             X = sm.add_constant(gA["SPX"])
-            fit = sm.OLS(gA[y_var], X).fit(cov_type="HAC", cov_kwds={"maxlags": max_lags}) #
+            if max_lags is None:
+                fit = sm.OLS(gA[y_var], X).fit()
+            else:
+                fit = sm.OLS(gA[y_var], X).fit(cov_type="HAC", cov_kwds={"maxlags": max_lags})
             a, b = fit.params
             ta, tb = fit.tvalues
             r2 = fit.rsquared
@@ -34,8 +37,11 @@ def capm_beta_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
         gB = g.dropna(subset=[y_var, "Mkt"])
         if len(gB) > 0:
             X = sm.add_constant(gB["Mkt"])
-            fit = sm.OLS(gB[y_var], X).fit(cov_type="HAC", cov_kwds={"maxlags": max_lags}) #
-            a, b = fit.params
+            if max_lags is None:
+                fit = sm.OLS(gB[y_var], X).fit()
+            else:
+                fit = sm.OLS(gB[y_var], X).fit(cov_type="HAC", cov_kwds={"maxlags": max_lags})
+                a, b = fit.params
             ta, tb = fit.tvalues
             r2 = fit.rsquared
         else:
@@ -95,3 +101,74 @@ def save_capm_beta_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
     with open(f"figures/Analysis/table_beta_{name}.tex", "w") as f:
         f.write(tex)
     return df
+
+
+
+
+def ff_three_factor_table(returns_df, name,
+                          y_var="r_30_SW_day", max_lags=0):
+    import numpy as np
+    import pandas as pd
+    import statsmodels.api as sm
+
+    TRADING_DAYS = 252
+    records = []
+    for ticker, g in returns_df.groupby("ticker"):
+        rec = {"Ticker": ticker}
+        # drop any row with a missing regressor or dependent
+        g0 = g.dropna(subset=[y_var, "Mkt", "SMB", "HML"])
+        if len(g0) > 0:
+            X = sm.add_constant(g0[["Mkt", "SMB", "HML"]])
+            fit = (sm.OLS(g0[y_var], X)
+                   .fit(cov_type="HAC", cov_kwds={"maxlags": max_lags}))
+            params = fit.params * TRADING_DAYS
+            tvals  = fit.tvalues
+            r2     = fit.rsquared
+            # pull out each coefficient + t-stat
+            alpha, βm, s, h = params["const"], params["Mkt"], params["SMB"], params["HML"]
+            tα, tβm, ts, th = tvals["const"], tvals["Mkt"], tvals["SMB"], tvals["HML"]
+        else:
+            alpha = βm = s = h = tα = tβm = ts = th = r2 = np.nan
+
+        rec.update({
+            r"\(\alpha\)": f"{alpha:.3f}\n({tα:.3f})",
+            r"\(ER^m\)"   : f"{βm:.3f}\n({tβm:.3f})",
+            r"\mathrm{SMB}": f"{s:.3f}\n({ts:.3f})",
+            r"\mathrm{HML}": f"{h:.3f}\n({th:.3f})",
+            r"\(R^2\)"    : f"{r2:.3f}",
+        })
+        records.append(rec)
+
+    df = pd.DataFrame(records).set_index("Ticker")
+
+    caption = (
+        "Explaining variance risk premiums with Fama–French risk factors. "
+        "Entries report the GMM estimates (and t-statistics in parentheses) of "
+        r"$\ln RV_{t,\tau}/SW_{t,\tau} = \alpha + \beta\,ER^m_{t,\tau} + s\,SMB_{t,\tau} + h\,HML_{t,\tau} + e$, "
+        "and unadjusted $R^2$."
+    )
+
+    latex = (
+        df.to_latex(index=True, escape=False, longtable=True,
+                    caption=caption,
+                    label=f"tab:analysis:ff{name}",
+                    column_format="lccccc",
+                    float_format="%.3f")
+          .splitlines()
+    )
+
+    # wrap in scriptsize + float barrier
+    out = ["\\scriptsize"] + latex + ["\\normalsize", "\\FloatBarrier"]
+    return "\n".join(out), df
+
+
+
+def save_ff_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
+    tex, df = ff_three_factor_table(returns_df, name, y_var, max_lags = max_lags)
+    with open(f"figures/Analysis/table_ff_{name}.tex", "w") as f:
+        f.write(tex)
+    return df
+
+
+
+

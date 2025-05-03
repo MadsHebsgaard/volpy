@@ -74,10 +74,24 @@ def load_od_FW_ticker(ticker, valid_dates):
 #     return od.groupby("date", group_keys=False).apply(_interpolate_per_date)
 
 
+import warnings
+import logging
+# logging.basicConfig(level=logging.DEBUG, format="[DEBUG] %(message)s")
+# logging.debug(f"Input FW shape: {FW.shape if not FW.empty else 'empty'}")
+
 
 def add_FW_to_od_ticker(od, FW):
-    """Interpolate forward prices (and only extrapolate if strictly out‐of‐bounds)."""
+    """Interpolate forward prices, using neighboring dates if necessary."""
     days_var = "c_days"
+
+    # Handle empty FW input
+    if FW.empty:
+        od["F"] = np.nan
+        return od
+
+    # Convert all dates to Timestamps upfront
+    FW["date"] = pd.to_datetime(FW["date"])
+    od["date"] = pd.to_datetime(od["date"])
 
     # Build date → (days_array, forward_array) mapping
     FW_grouped = {
@@ -89,57 +103,150 @@ def add_FW_to_od_ticker(od, FW):
     }
 
     def _find_prev_date(d):
-        # sorted list of available dates
         available_dates = sorted(FW_grouped)
-
-        # find largest date < d
         prev = [dt for dt in available_dates if dt < d]
-        if not prev:
-            return None
-        return prev[-1]
+        return prev[-1] if prev else None
 
-    def _extrapolate_linear(xp, yp, x):
-        # compute end‐slopes
-        m0 = (yp[1] - yp[0]) / (xp[1] - xp[0])
-        m1 = (yp[-1] - yp[-2]) / (xp[-1] - xp[-2])
-        y = np.empty_like(x, dtype=float)
-        # in‐range
-        mask = (x >= xp[0]) & (x <= xp[-1])
-        y[mask] = np.interp(x[mask], xp, yp)
-        # left‐extrapolate
-        left = x < xp[0]
-        y[left] = yp[0] + (x[left] - xp[0]) * m0
-        # right‐extrapolate
-        right = x > xp[-1]
-        y[right] = yp[-1] + (x[right] - xp[-1]) * m1
-        return y
+    def _find_next_date(d):
+        available_dates = sorted(FW_grouped)
+        next_dates = [dt for dt in available_dates if dt > d]
+        return next_dates[0] if next_dates else None
+
+    # def _inter_extrapolate_linear(xp, yp, x):
+    #     with np.errstate(divide='ignore', invalid='ignore'):
+    #         # Compute slopes at endpoints
+    #         if len(yp) >= 2:
+    #             m_start = (yp[1] - yp[0]) / (xp[1] - xp[0]) if xp[1] != xp[0] else 0
+    #             m_end = (yp[-1] - yp[-2]) / (xp[-1] - xp[-2]) if xp[-1] != xp[-2] else 0
+    #         else:
+    #             m_start = m_end = 0
+    #         return np.interp(
+    #             x, xp, yp,
+    #             left =yp[0]  + (x - xp[0])  * m_start,
+    #             right=yp[-1] + (x - xp[-1]) * m_end)
+
+    # def _inter_extrapolate_linear(xp, yp, x):
+    #     logging.debug(f"Input xp: {xp}, yp: {yp}, x: {x}")
+    #
+    #     if len(xp) == 0 or len(yp) == 0:
+    #         logging.warning("Empty xp or yp array")
+    #         return np.full_like(x, np.nan)
+    #
+    #     sort_indices = np.argsort(xp)
+    #     xp = xp[sort_indices]
+    #     yp = yp[sort_indices]
+    #     logging.debug(f"Sorted xp: {xp}, yp: {yp}")
+    #
+    #     if len(yp) == 1:
+    #         logging.debug("Single-point extrapolation")
+    #         return np.full_like(x, yp[0])
+    #
+    #     with np.errstate(divide='ignore', invalid='ignore'):
+    #         m_start = (yp[1] - yp[0]) / (xp[1] - xp[0]) if (xp[1] != xp[0]) else 0.0
+    #         m_end = (yp[-1] - yp[-2]) / (xp[-1] - xp[-2]) if (xp[-1] != xp[-2]) else 0.0
+    #
+    #     m_start = np.nan_to_num(m_start, nan=0.0, posinf=0.0, neginf=0.0)
+    #     m_end = np.nan_to_num(m_end, nan=0.0, posinf=0.0, neginf=0.0)
+    #     logging.debug(f"Slopes: m_start={m_start}, m_end={m_end}")
+    #
+    #     result = np.interp(
+    #         x, xp, yp,
+    #         left=yp[0] + (x - xp[0]) * m_start,
+    #         right=yp[-1] + (x - xp[-1]) * m_end
+    #     )
+    #     logging.debug(f"Result: {result}")
+    #     return result
+
+    def _inter_extrapolate_linear(xp, yp, x):
+        x = np.asarray(x)
+        xp = np.asarray(xp)
+        yp = np.asarray(yp)
+
+        # Handle edge cases
+        if len(xp) < 1 or len(yp) < 1:
+            return np.full_like(x, np.nan)
+        if len(xp) == 1:
+            return np.full_like(x, yp[0])
+
+        # Sort xp and yp
+        sort_idx = np.argsort(xp)
+        xp = xp[sort_idx]
+        yp = yp[sort_idx]
+
+        # Calculate slopes
+        with np.errstate(divide='ignore', invalid='ignore'):
+            m_start = (yp[1] - yp[0]) / (xp[1] - xp[0]) if (xp[1] != xp[0]) else 0.0
+            m_end = (yp[-1] - yp[-2]) / (xp[-1] - xp[-2]) if (xp[-1] != xp[-2]) else 0.0
+
+        # Split x into regions
+        mask_left = x < xp[0]
+        mask_mid = (x >= xp[0]) & (x <= xp[-1])
+        mask_right = x > xp[-1]
+
+        # Initialize result array
+        result = np.empty_like(x)
+
+        # Interpolate middle region
+        result[mask_mid] = np.interp(x[mask_mid], xp, yp)
+
+        # Extrapolate left region
+        result[mask_left] = yp[0] + (x[mask_left] - xp[0]) * m_start
+
+        # Extrapolate right region
+        result[mask_right] = yp[-1] + (x[mask_right] - xp[-1]) * m_end
+
+        return result
+
 
     def _interpolate_per_date(group):
         date = group["date"].iloc[0]
+
         if date in FW_grouped:
             xp, yp = FW_grouped[date]
+            target = group[days_var].values
+            fitted = _inter_extrapolate_linear(xp, yp, target)
         else:
             prev = _find_prev_date(date)
-            print(f"using {prev} instead of {date} for Forward Rate")
-            if prev is None:
-                raise ValueError(f"No forward‐price data at or before {date!r}")
-            xp, yp = FW_grouped[prev]
+            next_date = _find_next_date(date)
 
-        target = group[days_var].values
+            target = group[days_var].values
+            fitted = np.full_like(target, np.nan)  # Initialize
 
-        # decide if any points are out of [xp[0], xp[-1]]
-        if target.min() < xp[0] or target.max() > xp[-1]:
-            # extrapolate where needed
-            fitted = _extrapolate_linear(xp, yp, target)
-        else:
-            # pure interpolation
-            fitted = np.interp(target, xp, yp)
+            if prev and next_date:
+                # Get data from neighboring dates
+                xp_prev, yp_prev = FW_grouped[prev]
+                xp_next, yp_next = FW_grouped[next_date]
+
+                # Compute forwards from both dates
+                forward_prev = _inter_extrapolate_linear(xp_prev, yp_prev, target)
+                forward_next = _inter_extrapolate_linear(xp_next, yp_next, target)
+
+                # Check if forwards are within 10% of each other
+                avg = (forward_prev + forward_next) / 2
+                diff = np.abs(forward_prev - forward_next)
+                within_10pct = diff <= 0.1 * avg
+
+                # Time-based interpolation weights
+                days_prev = (pd.Timestamp(date) - pd.Timestamp(prev)).days
+                days_next = (pd.Timestamp(next_date) - pd.Timestamp(date)).days
+                total_days = days_prev + days_next
+                weight_prev = days_next / total_days if total_days > 0 else 0.5
+                weight_next = 1 - weight_prev
+
+                # Blend forwards where within 10%, else use closer date
+                blended = forward_prev * weight_prev + forward_next * weight_next
+                fitted = np.where(within_10pct, blended, np.nan)
+                if not np.all(within_10pct):
+                    warnings.warn(f"Some forwards for {date} differ >10% between {prev} and {next_date}", UserWarning)
+            else:
+                warnings.warn(f"No forward data for {date}, and no prev/next dates to interpolate between", UserWarning)
 
         group = group.copy()
         group["F"] = fitted
         return group
 
     return od.groupby("date", group_keys=False).apply(_interpolate_per_date)
+
 
 
 
@@ -209,6 +316,7 @@ def load_clean_and_prepare_od_ticker(
     # 1) Load + forward
     od, FW, returns_and_prices = load_od_FW_ticker(ticker, valid_dates)
     od = add_FW_to_od_ticker(od, FW)
+    # todo: evt. fjern alle optioner der mangler forward for en given dato
 
     # 2) Add IV
     od["IV"] = vp.add_bid_mid_ask_IV(od, IV_type, safe_slow_IV=safe_slow_IV)
@@ -431,6 +539,7 @@ def _process_one_ticker(
         # coerce everything to str and join with spaces
         logs.append(" ".join(str(m) for m in msgs))
 
+
     tickers_dir   = base_dir / "Tickers"
     out_dir       = tickers_dir / "Output" / days_type() / ticker
     sum1_dir      = tickers_dir / "SumAndOrpy" / days_type() / "sum1"
@@ -446,11 +555,12 @@ def _process_one_ticker(
             IV_type=IV_type, safe_slow_IV=safe_slow_IV,
         )
 
+        # L("Write log here", od.columns)
+
         # 2) Summarize into daily frame + ready-to-use od
         summary_dly_df, od_rdy = create_summary_dly_df_ticker(
             od, returns_and_prices, RF, n_grid=2000
         )
-
         # 3) Interpolate missing swaps/returns, reset index for CSV
         summary_dly_df = vp.interpolate_swaps_and_returns(summary_dly_df).reset_index()
 
@@ -469,6 +579,7 @@ def _process_one_ticker(
         gc.collect()
         return logs
 
+# import traceback
 
 def load_analyze_create_swap_ticker_parallel(
     ticker_list: list[str],
@@ -524,9 +635,18 @@ def load_analyze_create_swap_ticker_parallel(
 
                 print(f"[✓] {tkr}")
             except Exception as e:
+                # traceback.print_exc()  # Add this import at the top
                 print(f"[✗] {tkr} failed: {e}")
 
     print("All tickers processed.")
+
+    # # Replace the ProcessPoolExecutor block with:
+    # for ticker in ticker_list:
+    #     try:
+    #         logs = _process_one_ticker(ticker, valid_dates, ZCY_curves, RF, base_dir, IV_type, safe_slow_IV)
+    #         print(f"[✓] {ticker}")
+    #     except Exception:
+    #         traceback.print_exc()
 
 
 

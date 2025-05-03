@@ -699,35 +699,45 @@ def process_group_activity_summary(group):
         return group, summary
 
     # Vælg de to dage, der skal bruges – opdel unikke dage i dem under og over 30 dage
-    days_below_target = unique_days[(unique_days <= target_days) & (unique_days > 8 - t_bool*3)] # bør være 5 hvis handelsdage
+    days_below_target = unique_days[(unique_days <= target_days) & (unique_days > 8 - t_bool*3)]
     days_above_target = unique_days[unique_days >= target_days]
 
     low_day = None
     high_day = None
     if len(days_below_target) > 0 and len(days_above_target) > 0:
         # 1) Find low_day: tættest på cutoff under target_days
-        low_day = None
         for day in sorted(days_below_target, reverse=True):
             if group.loc[group[days_var] == day, "K"].dropna().nunique() >= 3:
                 low_day = day
                 break
 
         # 2) Find high_day: tættest på cutoff over target_days
-        high_day = None
         for day in sorted(days_above_target):
             if group.loc[group[days_var] == day, "K"].dropna().nunique() >= 3:
                 high_day = day
                 break
 
     elif len(days_below_target) >= 2:
-        low_2_days = list(days_below_target[-2:])
-        low_day = low_2_days[0]
-        high_day = low_2_days[1]
+        valid_days = []
+        # Iterate days below in reverse (closest to target first)
+        for day in sorted(days_below_target, reverse=True):
+            if group.loc[group[days_var] == day, "K"].dropna().nunique() >= 3:
+                valid_days.append(day)
+                if len(valid_days) == 2:
+                    break
+        if len(valid_days) >= 2:
+            low_day, high_day = valid_days[0], valid_days[1]
 
     elif len(days_above_target) >= 2:
-        low_2_days = list(days_above_target[:2])
-        low_day = low_2_days[0]
-        high_day = low_2_days[1]
+        valid_days = []
+        # Iterate days above in ascending order (closest first)
+        for day in sorted(days_above_target):
+            if group.loc[group[days_var] == day, "K"].dropna().nunique() >= 3:
+                valid_days.append(day)
+                if len(valid_days) == 2:
+                    break
+        if len(valid_days) >= 2:
+            low_day, high_day = valid_days[0], valid_days[1]
 
     # if len(unique_days) < 3 and unique_days[0] <= 8:
     #     summary["Active"] = False
@@ -753,9 +763,8 @@ def process_group_activity_summary(group):
     # Beregn #K før filter opdelt i low/high dage
     low_counts  = [k_per_ex.get(d, np.nan) for d in days_below_target]
     high_counts = [k_per_ex.get(d, np.nan) for d in days_above_target]
-    summary["#K_low_before_filter"]  = np.nanmean(low_counts)  if low_counts  else np.nan
-    summary["#K_high_before_filter"] = np.nanmean(high_counts) if high_counts else np.nan
-
+    summary["#K_low_mean_3"]  = np.nanmean(low_counts)  if low_counts  else np.nan
+    summary["#K_high_mean_3"] = np.nanmean(high_counts) if high_counts else np.nan
 
     # 3) Brug dem hvis begge fundet
     if low_day is not None and high_day is not None:
@@ -780,9 +789,9 @@ def process_group_activity_summary(group):
         summary["Inactive reason"] = "unique(K) < 3"
         return group, summary
 
-    # Sæt 'low' og 'high' flags for de respektive rækker
-    group.loc[group[days_var] == low_2_days[0], "low"] = True
-    group.loc[group[days_var] == low_2_days[1], "high"] = True
+    # # Sæt 'low' og 'high' flags for de respektive rækker
+    # group.loc[group[days_var] == low_day, "low"] = True
+    # group.loc[group[days_var] == high_day, "high"] = True
 
     return group, summary
 
