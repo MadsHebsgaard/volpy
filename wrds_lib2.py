@@ -60,7 +60,6 @@ def fetch_options_data_per_ticker_days_iv_flag(
                           AND o.date <  '{date_end_str}'
                           AND o.secid = {secid}
                           AND (o.exdate - o.date) <= 365
-                          AND NOT (s.issue_type = '' OR s.exchange_d = 0)
                     ),
                     medians AS (
                         SELECT date, exdate, cp_flag,
@@ -84,6 +83,8 @@ def fetch_options_data_per_ticker_days_iv_flag(
                             OR b.impl_volatility IS NULL
                         )
                 """
+
+                # AND NOT (s.issue_type = '' OR s.exchange_d = 0)
 
                 chunk = db.raw_sql(sql_chunk, date_cols=["date", "exdate"])
 
