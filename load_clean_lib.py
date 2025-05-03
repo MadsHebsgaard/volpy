@@ -171,7 +171,8 @@ def summary_dly_df_creator(od):
     summary_dly_df["low #K"] = np.nan
     summary_dly_df["high #K"] = np.nan
     summary_dly_df["#K"] = np.nan
-    summary_dly_df["#K_before_filter"] = np.nan
+    summary_dly_df["#K_low_before_filter"] = np.nan
+    summary_dly_df["#K_high_before_filter"] = np.nan
 
     summary_dly_df["Active"] = False
     summary_dly_df["Inactive reason"] = "missing"

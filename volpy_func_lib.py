@@ -740,12 +740,22 @@ def process_group_activity_summary(group):
         summary["Inactive reason"] = f"min days > {3*target_days}"
         return group, summary
 
+    # # Sørg for at 'K' er numerisk
+    # group["K"] = pd.to_numeric(group["K"], errors="coerce")
+    # # Tæl unikke strikes per exdate
+    # k_per_ex = group.groupby(days_var)["K"].nunique()
+    # # Gem gennemsnittet
+    # summary["#K_before_filter"] = k_per_ex.mean()
     # Sørg for at 'K' er numerisk
     group["K"] = pd.to_numeric(group["K"], errors="coerce")
     # Tæl unikke strikes per exdate
     k_per_ex = group.groupby(days_var)["K"].nunique()
-    # Gem gennemsnittet
-    summary["#K_before_filter"] = k_per_ex.mean()
+    # Beregn #K før filter opdelt i low/high dage
+    low_counts  = [k_per_ex.get(d, np.nan) for d in days_below_target]
+    high_counts = [k_per_ex.get(d, np.nan) for d in days_above_target]
+    summary["#K_low_before_filter"]  = np.nanmean(low_counts)  if low_counts  else np.nan
+    summary["#K_high_before_filter"] = np.nanmean(high_counts) if high_counts else np.nan
+
 
     # 3) Brug dem hvis begge fundet
     if low_day is not None and high_day is not None:
