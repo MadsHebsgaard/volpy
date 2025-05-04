@@ -1003,7 +1003,8 @@ def interpolate_swaps_and_returns(summary_dly_df):
     SW2 = summary_dly_df["high SW"]
 
     theta_30 = (T - T1) / (T2 - T1)
-    summary_dly_df["SW_0_30"] = SW1 * (1 - theta_30) + SW2 * theta_30
+    SW = SW1 * (1 - theta_30) + SW2 * theta_30
+    summary_dly_df["SW_0_30"] = SW
 
     theta_29 = ((T - 1) - T1) / (T2 - T1)
     summary_dly_df["SW_0_29"] = SW1 * (1 - theta_29) + SW2 * theta_29
@@ -1024,8 +1025,66 @@ def interpolate_swaps_and_returns(summary_dly_df):
     avg_sw = summary_dly_df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
     summary_dly_df["r_30_SW_day"] = summary_dly_df["CF_30_SW_day"] / avg_sw
 
+
+
+    # Calculating high/low compatibility
+    summary_dly_df["high_low_compatibility"] = -(T1 - T) * (T2 - T) * (SW1 - SW2)**2 / T**2
+    # If positive they are good (interpolating from either side), yet best if closer to 0
+    # if negative they are bad, getting worse as the compatibility decreases.
+    # If 0 the swap is either low/high SW or the rates of both are identical, in which case the swap rate time curve could be convex or concave leading to some interpolation error still.
+
+    # Calculating SW score
+    min_SW = np.minimum(SW1, SW2)
+    max_SW = np.maximum(SW1, SW2)
+
+    summary_dly_df["SW_score"] = np.maximum(
+        SW / min_SW, max_SW/SW
+    )
+    # if 1 then the interpolated swap is perfectly close to either swap, accuracy decreases when score increases.
+    # if negative the swap is negative
+
+
     return summary_dly_df
 
+def add_calcs_to_files(filename_list):
+    if days_type() == "c_":
+        T = 30
+    elif days_type() == "t_":
+        T = 21
+
+    base_dir = load_clean_lib.Option_metrics_path_from_profile()
+
+    for filename in filename_list:
+        file_dir = base_dir / "Tickers" / "SumAndOrpy" / "t_" / filename
+
+        for ticker in file_dir.iterdir():
+            df = pd.read_csv(file_dir / f"{ticker}")
+
+            T1 = df["low days"]
+            T2 = df["high days"]
+            SW1 = df["low SW"]
+            SW2 = df["high SW"]
+            SW = df["SW_0_30"]
+
+
+            # Calculating high/low compatibility
+            df["high_low_compatibility"] = -(T1 - T) * (T2 - T) * (SW1 - SW2)**2 / T**2
+            # If positive they are good (interpolating from either side), yet best if closer to 0
+            # if negative they are bad, getting worse as the compatibility decreases.
+            # If 0 the swap is either low/high SW or the rates of both are identical, in which case the swap rate time curve could be convex or concave leading to some interpolation error still.
+
+            # Calculating SW score
+            min_SW = np.minimum(SW1, SW2)
+            max_SW = np.maximum(SW1, SW2)
+
+            df["SW_score"] = np.maximum(
+                SW / min_SW,
+                max_SW / SW
+            )
+            # if 1 then the interpolated swap is perfectly close to either swap, accuracy decreases when score increases.
+            # if negative the swap is negative
+            df.to_csv(file_dir / f"{ticker}")
+        print(f"finished with {filename}")
 
 
 def add_realized_vol_to_summary(summary_dly_df, real_vol):
@@ -2349,24 +2408,28 @@ def dirs_to_list():
 
 
 # removed tickers = ["TLT", "SHY", "CEW"] (TLT removed from VIX and Cross-AM, SHY and CEW removed from Cross-AM)
-OEX_tickers = ["OEX", "OEF", "AA", "AAPL", "ABBV", "ABT", "ACN", "ADBE", "AEP", "AES", "AGN", "AIG", "ALL", "AMD", "AMGN", "AMT", "AMZN", "APA", "APC", "ATI", "AVGO", "AVP", "AXP", "BA", "BAC", "BAX", "BDK", "BHI", "BIIB", "BK", "BKNG", "BMY", "BNI", "BRK", "BUD", "C", "CAT", "CELG", "CGP", "CHTR", "CI", "CL", "CLB", "CMCSA", "CMCSK", "COF", "COP", "COST", "COV", "CPB", "CRM", "CSC", "CSCO", "CVS", "CVX", "DAL", "DD", "DE", "DELL", "DHR", "DIS", "DOW", "DUK", "DVN", "EBAY", "EMC", "EMR", "ENE", "EP", "ETR", "EXC", "F", "FCX", "FDX", "G", "GBLX", "GD", "GE", "GILD", "GM", "GOOG", "GOOGL", "GS", "GTX", "HAL", "HCA", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JCI", "JNJ", "JPM", "KHC", "KMI", "KO", "LEH", "LIN", "LLY", "LMT", "LOW", "MA", "MAY", "MCD", "MDLZ", "MDT", "MER", "MET", "META", "MMM", "MO", "MON", "MRK", "MS", "MSFT", "NEE", "NFLX", "NKE", "NOV", "NSC", "NSM", "NT", "NVDA", "NXTL", "NYX", "OMX", "ONE", "ORCL", "OXY", "PARA", "PEP", "PFE", "PG", "PM", "PNU", "PYPL", "QCOM", "RAL", "RF", "ROK", "RSH", "RTN", "RTX", "S", "SBUX", "SCHW", "SGP", "SLB", "SO", "SPG", "T", "TGT", "TMO", "TMUS", "TOY", "TSLA", "TWX", "TXN", "UBAN", "UIS", "UNH", "UNP", "UPS", "USB", "V", "VZ", "WB", "WBA", "WFC", "WMB", "WMT", "WY", "WYE", "XOM", "XRX"]
-Cross_AM_tickers =  ["SPX", "VGK", "FXI", "EWJ", "EWZ", "INDA", "EZA", "EWC", "EEM", "EWU", "EWY", "EWA", "EWW", "VNQ", "TIP", "LQD", "HYG", "EMB", "IAU", "SLV", "UNG", "USO", "UVXY", "UUP", "FXE", "FXY", "BITO" ]
-VIX_tickers = ["SPX", "GOOGL", "AMZN", "DIA", "IWM", "QQQ", "AAPL", "EWZ", "USO", "GS", "EEM", "FXE", "SLV", "IBM"]
-DJX_tickers = ["DJX", "AA", "AAPL", "AIG", "AMGN", "AMZN", "AXP", "BA", "BAC", "C", "CAT", "CRM", "CSCO", "CVX", "DD", "DIS", "DOW", "GE", "GM", "GS", "GT", "HD", "HON", "HPQ", "IBM", "INTC", "IP", "JNJ", "JPM", "KO", "MCD", "MMM", "MO", "MRK", "MSFT", "NKE", "PFE", "PG", "RTX", "S", "T", "TRV", "UK", "UNH", "V", "VZ", "WBA", "WMT", "XOM"]
+OEX_tickers_old = ["OEX", "OEF", "AA", "AAPL", "ABBV", "ABT", "ACN", "ADBE", "AEP", "AES", "AGN", "AIG", "ALL", "AMD", "AMGN", "AMT", "AMZN", "APA", "APC", "ATI", "AVGO", "AVP", "AXP", "BA", "BAC", "BAX", "BDK", "BHI", "BIIB", "BK", "BKNG", "BMY", "BNI", "BRK", "BUD", "C", "CAT", "CELG", "CGP", "CHTR", "CI", "CL", "CLB", "CMCSA", "CMCSK", "COF", "COP", "COST", "COV", "CPB", "CRM", "CSC", "CSCO", "CVS", "CVX", "DAL", "DD", "DE", "DELL", "DHR", "DIS", "DOW", "DUK", "DVN", "EBAY", "EMC", "EMR", "ENE", "EP", "ETR", "EXC", "F", "FCX", "FDX", "G", "GBLX", "GD", "GE", "GILD", "GM", "GOOG", "GOOGL", "GS", "GTX", "HAL", "HCA", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JCI", "JNJ", "JPM", "KHC", "KMI", "KO", "LEH", "LIN", "LLY", "LMT", "LOW", "MA", "MAY", "MCD", "MDLZ", "MDT", "MER", "MET", "META", "MMM", "MO", "MON", "MRK", "MS", "MSFT", "NEE", "NFLX", "NKE", "NOV", "NSC", "NSM", "NT", "NVDA", "NXTL", "NYX", "OMX", "ONE", "ORCL", "OXY", "PARA", "PEP", "PFE", "PG", "PM", "PNU", "PYPL", "QCOM", "RAL", "RF", "ROK", "RSH", "RTN", "RTX", "S", "SBUX", "SCHW", "SGP", "SLB", "SO", "SPG", "T", "TGT", "TMO", "TMUS", "TOY", "TSLA", "TWX", "TXN", "UBAN", "UIS", "UNH", "UNP", "UPS", "USB", "V", "VZ", "WB", "WBA", "WFC", "WMB", "WMT", "WY", "WYE", "XOM", "XRX"]
+Cross_AM_tickers_old =  ["SPX", "VGK", "FXI", "EWJ", "EWZ", "INDA", "EZA", "EWC", "EEM", "EWU", "EWY", "EWA", "EWW", "VNQ", "TIP", "LQD", "HYG", "EMB", "IAU", "SLV", "UNG", "USO", "UVXY", "UUP", "FXE", "FXY", "BITO" ]
+VIX_tickers_old = ["SPX", "GOOGL", "AMZN", "DIA", "IWM", "QQQ", "AAPL", "EWZ", "USO", "GS", "EEM", "FXE", "SLV", "IBM"]
+DJX_tickers_old = ["DJX", "AA", "AAPL", "AIG", "AMGN", "AMZN", "AXP", "BA", "BAC", "C", "CAT", "CRM", "CSCO", "CVX", "DD", "DIS", "DOW", "GE", "GM", "GS", "GT", "HD", "HON", "HPQ", "IBM", "INTC", "IP", "JNJ", "JPM", "KO", "MCD", "MMM", "MO", "MRK", "MSFT", "NKE", "PFE", "PG", "RTX", "S", "T", "TRV", "UK", "UNH", "V", "VZ", "WBA", "WMT", "XOM"]
 
-All_tickers2_manual = ["NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "TMUS", "SCHW", "AMD", "DE", "INTU", "UK", "GT", "TRV", "SHW", "LIN", "GX", "JCI", "MDT", "COV", "ACN", "OEX", "SPX", "DJX", "BITO", "CEW", "DIA", "EEM", "EMB", "EWA", "EWC", "EWJ", "EWU_old", "EWW", "EWY", "EWZ", "EZA", "FXE", "FXI", "FXY", "HYG", "IAU", "INDA", "INDU", "IWM", "LQD", "OEF", "QQQ", "SHY", "SLV", "SPY", "TIP", "TLT", "USO", "UUP", "VGK", "VNQ", "UNG", "UVXY", "NDX", "EWU"]
-DJX_tickers2 = ["DJX", "UK", "DD_eidp", "JPM", "S_sears", "AA", "AXP", "BA", "C", "CAT", "CVX", "DIS", "EK", "GE", "GT", "HON", "HPQ", "IBM", "IP", "JNJ", "KO", "MCD", "MMM", "MO", "MRK", "PG", "RTX", "T", "WMT", "XOM", "T_old", "HD", "INTC", "MSFT", "AIG", "PFE", "VZ", "BAC", "MDLZ", "CSCO", "TRV", "UNH", "GS", "NKE", "V", "AAPL", "DD", "WBA", "DOW_inc", "AMGN", "CRM", "AMZN", "NVDA", "SHW"]
-OEX_tickers2 = ["OEX", "OEF", "NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JCI", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MDT", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "COV", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "ACN", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "LIN", "TMUS", "SCHW", "AMD", "DE", "INTU"]
-Market_tickers2 = DJX_tickers2 + OEX_tickers2
-
-Index_tickers = ["SPX", "OEX", "NDX", "DJX"]
-ETF_tickers   = ["SPY", "OEF", "QQQ", "DIA"]
-Liquid_ETF_Idx_tickers = Index_tickers + ETF_tickers
-Liquid_stock_tickers = ['GOOG', 'BKNG', 'TSLA', 'GOOGL', 'AMZN', 'META', 'NFLX', 'MA', 'PYPL', 'AAPL', 'AVGO', 'CHTR', 'NVDA', 'CRM', 'ABBV', 'HCA', 'V', 'GS', 'WB', 'GM', 'PM', 'MSFT', 'PARA', 'BA', 'ADBE', 'TMUS', 'OXY', 'MET', 'DE', 'DAL', 'BIIB', 'JPM', 'CAT', 'DIS', 'COST', 'COF', 'IBM', 'QCOM', 'GILD', 'ACN', 'UNH', 'C']
-Liquid_tickers = Liquid_ETF_Idx_tickers + Liquid_stock_tickers
+Index_tickers_old = ["SPX", "OEX", "NDX", "DJX"]
+ETF_tickers_old   = ["SPY", "OEF", "QQQ", "DIA"]
+Liquid_stock_tickers_old = ['GOOG', 'BKNG', 'TSLA', 'GOOGL', 'AMZN', 'META', 'NFLX', 'MA', 'PYPL', 'AAPL', 'AVGO', 'CHTR', 'NVDA', 'CRM', 'ABBV', 'HCA', 'V', 'GS', 'WB', 'GM', 'PM', 'MSFT', 'PARA', 'BA', 'ADBE', 'TMUS', 'OXY', 'MET', 'DE', 'DAL', 'BIIB', 'JPM', 'CAT', 'DIS', 'COST', 'COF', 'IBM', 'QCOM', 'GILD', 'ACN', 'UNH', 'C']
+Liquid_ETF_Idx_tickers_old = Index_tickers_old + ETF_tickers_old
+Liquid_tickers = Liquid_ETF_Idx_tickers_old + Liquid_stock_tickers_old
+ALL_tickers_old = get_unique_tickers([OEX_tickers_old, Cross_AM_tickers_old, VIX_tickers_old, DJX_tickers_old, Liquid_ETF_Idx_tickers_old])
 
 
-ALL_tickers = get_unique_tickers([OEX_tickers, Cross_AM_tickers, VIX_tickers, DJX_tickers, Liquid_tickers])
+# Manual tickers
+All_tickers = ["NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "TMUS", "SCHW", "AMD", "DE", "INTU", "UK", "GT", "TRV", "SHW", "LIN", "GX", "JCI", "MDT", "COV", "ACN", "OEX", "SPX", "DJX", "BITO", "CEW", "DIA", "EEM", "EMB", "EWA", "EWC", "EWJ", "EWU_old", "EWW", "EWY", "EWZ", "EZA", "FXE", "FXI", "FXY", "HYG", "IAU", "INDA", "INDU", "IWM", "LQD", "OEF", "QQQ", "SHY", "SLV", "SPY", "TIP", "TLT", "USO", "UUP", "VGK", "VNQ", "UNG", "UVXY", "NDX", "EWU"]
+DJX_tickers = ["DJX", "UK", "DD_eidp", "JPM", "S_sears", "AA", "AXP", "BA", "C", "CAT", "CVX", "DIS", "EK", "GE", "GT", "HON", "HPQ", "IBM", "IP", "JNJ", "KO", "MCD", "MMM", "MO", "MRK", "PG", "RTX", "T", "WMT", "XOM", "T_old", "HD", "INTC", "MSFT", "AIG", "PFE", "VZ", "BAC", "MDLZ", "CSCO", "TRV", "UNH", "GS", "NKE", "V", "AAPL", "DD", "WBA", "DOW_inc", "AMGN", "CRM", "AMZN", "NVDA", "SHW"]
+OEX_tickers = ["OEX", "OEF", "NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JCI", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MDT", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "COV", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "ACN", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "LIN", "TMUS", "SCHW", "AMD", "DE", "INTU"]
+Cross_AM_tickers = ["SPX"]
+Market_tickers = DJX_tickers + OEX_tickers
+
+
+
 
 
 Car_wu_tickers = ["SPX", "OEX", "DJX", "NDX", "QQQ", "MSFT", "INTC", "IBM", "AMER", "DELL",
