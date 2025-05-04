@@ -744,6 +744,12 @@ def process_group_activity_summary(group):
     #     summary["Inactive reason"] = "min days <= 8 & len < 3"
     #     return group, summary
 
+    # first check if low and high is found
+    if low_day is None or high_day is None:
+        summary["Active"] = False
+        summary["Inactive reason"] = "Not 2 close days"
+        return group, summary
+
     # Inaktiv hvis den mindste dag er for stor, med justering baseret på x
     if low_day > 90 - t_bool * 90 * 0.3:
         summary["Active"] = False
