@@ -766,11 +766,11 @@ def process_group_activity_summary(group):
     #     summary["Inactive reason"] = "min days <= 8 & len < 3"
     #     return group, summary
 
-    # first check if low and high is found
-    if low_day is None or high_day is None:
-        summary["Active"] = False
-        summary["Inactive reason"] = "Not 2 close days"
-        return group, summary
+    # # first check if low and high is found
+    # if low_day is None or high_day is None:
+    #     summary["Active"] = False
+    #     summary["Inactive reason"] = "Not 2 close days"
+    #     return group, summary
 
     # Inaktiv hvis den mindste dag er for stor, med justering baseret på x
     if low_day > 90 - t_bool * 90 * 0.3:
@@ -1012,45 +1012,25 @@ def high_low_swap_rates(summary_dly_df, od_rdy, n_points=200):
 #     return summary_dly_df
 
 
-def interpolate_swaps_and_returns(summary_dly_df):
+def interpolate_swaps_and_returns(df):
     if days_type() == "c_":
         T = 30
     elif days_type() == "t_":
         T = 21
 
     #interpolation
-    T1 = summary_dly_df["low days"]
-    T2 = summary_dly_df["high days"]
-    SW1 = summary_dly_df["low SW"]
-    SW2 = summary_dly_df["high SW"]
+    T1 = df["low days"]
+    T2 = df["high days"]
+    SW1 = df["low SW"]
+    SW2 = df["high SW"]
 
     theta_30 = (T - T1) / (T2 - T1)
     SW = SW1 * (1 - theta_30) + SW2 * theta_30
-    summary_dly_df["SW_0_30"] = SW
-
-    theta_29 = ((T - 1) - T1) / (T2 - T1)
-    summary_dly_df["SW_0_29"] = SW1 * (1 - theta_29) + SW2 * theta_29
-
-    #Shifted values
-    summary_dly_df["SW_m1_29"] = summary_dly_df.groupby("ticker")["SW_0_30"].shift(1)
-
-    #discount factor
-    summary_dly_df["discount_factor_30d"] = 1 / (1 + summary_dly_df["RF"])**(20)
-
-    # Casflow version baseret på markedsværdi af en daglig (-short) swap = long
-    summary_dly_df["CF_30_SW_day"] = - (
-        summary_dly_df["SW_m1_29"]  # fast ben er det samme 
-        - summary_dly_df["SW_0_29"] * (T - 1) / T  # ny "rest" variabelt ben
-        - summary_dly_df["squared_return"] * 252 * 1 / T  # realiseret variabllt ben
-    )  * summary_dly_df["discount_factor_30d"]  # diskonteres
-
-    avg_sw = summary_dly_df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
-    summary_dly_df["r_30_SW_day"] = summary_dly_df["CF_30_SW_day"] / avg_sw
-
+    df["SW_0_30"] = SW
 
 
     # Calculating high/low compatibility
-    summary_dly_df["high_low_compatibility"] = -(T1 - T) * (T2 - T) * (SW1 - SW2)**2 / T**2
+    df["high_low_compatibility"] = -(T1 - T) * (T2 - T) * (SW1 - SW2) ** 2 / T ** 2
     # If positive they are good (interpolating from either side), yet best if closer to 0
     # if negative they are bad, getting worse as the compatibility decreases.
     # If 0 the swap is either low/high SW or the rates of both are identical, in which case the swap rate time curve could be convex or concave leading to some interpolation error still.
@@ -1059,14 +1039,40 @@ def interpolate_swaps_and_returns(summary_dly_df):
     min_SW = np.minimum(SW1, SW2)
     max_SW = np.maximum(SW1, SW2)
 
-    summary_dly_df["SW_score"] = np.maximum(
+    df["SW_score"] = np.maximum(
         SW / min_SW, max_SW/SW
     )
     # if 1 then the interpolated swap is perfectly close to either swap, accuracy decreases when score increases.
     # if negative the swap is negative
 
+    df = df[
+        (df["SW_score"] < 3) &
+        (df["SW_score"] > 0) &
+        (df["high_low_compatibility"] > -0.25) &
+        (df["high_low_compatibility"] < 2)
+    ]
 
-    return summary_dly_df
+    theta_29 = ((T - 1) - T1) / (T2 - T1)
+    df["SW_0_29"] = SW1 * (1 - theta_29) + SW2 * theta_29
+
+    #Shifted values
+    df["SW_m1_29"] = df.groupby("ticker")["SW_0_30"].shift(1)
+
+    #discount factor
+    df["discount_factor_30d"] = 1 / (1 + df["RF"]) ** (20)
+
+    # Casflow version baseret på markedsværdi af en daglig (-short) swap = long
+    df["CF_30_SW_day"] = - (
+            df["SW_m1_29"]  # fast ben er det samme
+            - df["SW_0_29"] * (T - 1) / T  # ny "rest" variabelt ben
+            - df["squared_return"] * 252 * 1 / T  # realiseret variabllt ben
+    ) * df["discount_factor_30d"]  # diskonteres
+
+    avg_sw = df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
+    df["r_30_SW_day"] = df["CF_30_SW_day"] / avg_sw
+
+
+    return df
 
 def add_calcs_to_files(filename_list):
     if days_type() == "c_":
