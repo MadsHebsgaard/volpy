@@ -303,7 +303,6 @@ def add_FW_to_od_ticker(od, FW):
 
 
 
-
 def clean_od_ticker(od):
     days_var = days_type() + "days"
 
@@ -501,6 +500,7 @@ def create_summary_dly_df_ticker(od, returns_and_prices, RF, n_grid=200):
     summary_dly_df = high_low_swap_rates_ticker(summary_dly_df, od_rdy, n_points=n_grid)
 
 
+
     return summary_dly_df, od
 
 
@@ -615,6 +615,7 @@ def _process_one_ticker(
         summary_dly_df, od_rdy = create_summary_dly_df_ticker(
             od, returns_and_prices, RF, n_grid=2000
         )
+
         # 3) Interpolate missing swaps/returns, reset index for CSV
         summary_dly_df = vp.interpolate_swaps_and_returns(summary_dly_df).reset_index()
 
@@ -625,6 +626,7 @@ def _process_one_ticker(
         summary_dly_df.to_csv(out_dir / "sum1_df.csv",    index=False)
         od_raw.to_csv(       out_dir / "od_raw.csv",      index=False)
         od_rdy.to_csv(           out_dir / "od_rdy.csv",  index=False)
+        L(ticker, "files has been created")
     finally:
         # Explicitly delete large objects and run garbage collector
         for obj in ("od", "returns_and_prices", "od_raw", "summary_dly_df", "od_rdy"):
@@ -680,17 +682,23 @@ def load_analyze_create_swap_ticker_parallel(
             for ticker in ticker_list
         }
 
+        count = 0
         for fut in as_completed(futures):
+            count += 1
+            str = f"{count}/{len(ticker_list)} = {count/len(ticker_list)*100}%"
             tkr = futures[fut]
             try:
                 logs = fut.result()
-                for line in logs:
-                    print(line)  # now you _will_ see them
-
-                print(f"[✓] {tkr}")
+                # for line in logs:
+                #     print(line)
+                if not logs:
+                    # no calls to L() ever happened
+                    print(f"[%] {tkr} failed: Due to un-raised error, {str}")
+                else:
+                    print(f"[✓] {tkr}, {str}")
             except Exception as e:
                 # traceback.print_exc()  # Add this import at the top
-                print(f"[✗] {tkr} failed: {e}")
+                print(f"[✗] {tkr} failed: {e}, {str}")
 
     print("All tickers processed.")
 
