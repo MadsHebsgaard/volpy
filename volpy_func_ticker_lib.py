@@ -429,7 +429,7 @@ def load_clean_and_prepare_od_ticker(
 
     # 9) Ryd op og returnér
     od.drop(columns=["rel_dev", "median_mid", "thr_dev", "flag1", "flag2", "remove"], inplace=True)
-    
+
     return od, returns_and_prices, od_raw
 
 
@@ -480,7 +480,9 @@ def create_summary_dly_df_ticker(od, returns_and_prices, RF, n_grid=200):
     last_day = od["date"].max()
 
     # Add low/high and create summary (Filters dataset for criteria such as min 3 strikes ... min 8 days...)
+
     od, summary_dly_df = vp.od_filter_and_summary_creater(od)
+
 
     summary_dly_df.reset_index(inplace=True)
 
@@ -572,6 +574,7 @@ from volpy_func_ticker_lib import (
     days_type,
 )
 
+# load_clean_lib.create_log_with_enty("1")
 
 def _process_one_ticker(
     ticker: str,
@@ -593,13 +596,13 @@ def _process_one_ticker(
         # coerce everything to str and join with spaces
         logs.append(" ".join(str(m) for m in msgs))
 
-
     tickers_dir   = base_dir / "Tickers"
     out_dir       = tickers_dir / "Output" / days_type() / ticker
     sum1_dir      = tickers_dir / "SumAndOrpy" / days_type() / "sum1"
 
     # skip if already done
     if out_dir.exists():
+        L("directory already exists; skipping.")
         return logs
 
     try:
@@ -608,8 +611,6 @@ def _process_one_ticker(
             ticker, valid_dates, ZCY_curves,
             IV_type=IV_type, safe_slow_IV=safe_slow_IV,
         )
-
-        # L("Write log here", od.columns)
 
         # 2) Summarize into daily frame + ready-to-use od
         summary_dly_df, od_rdy = create_summary_dly_df_ticker(
@@ -637,6 +638,7 @@ def _process_one_ticker(
 
 # import traceback
 
+# load_clean_lib.create_log_with_enty("1")
 def load_analyze_create_swap_ticker_parallel(
     ticker_list: list[str],
     IV_type: str = "om",
@@ -685,7 +687,7 @@ def load_analyze_create_swap_ticker_parallel(
         count = 0
         for fut in as_completed(futures):
             count += 1
-            str = f"{count}/{len(ticker_list)} = {count/len(ticker_list)*100}%"
+            str = f"{count}/{len(ticker_list)} = {round(count/len(ticker_list)*100, 1)}% tickers compleated"
             tkr = futures[fut]
             try:
                 logs = fut.result()
