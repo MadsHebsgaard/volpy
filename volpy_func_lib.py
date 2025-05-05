@@ -327,6 +327,9 @@ def add_FW_to_od(od, FW):
 def calc_realized_var(returns_and_prices, first_day, last_day):
     # Bestem T ud fra days_type()
 
+
+    last_available_date = returns_and_prices["date"].max()
+
     if days_type() == "c_":
         T = 30  # Kalenderdage
     elif days_type() == "t_":
@@ -373,9 +376,18 @@ def calc_realized_var(returns_and_prices, first_day, last_day):
                 mask = group["date"].isin(future_dates)
                 window = group.loc[mask]
                 rv_sum = window["squared_return"].sum()
-                active_days = window.shape[0]
-                rv_list.append(rv_sum)
-                active_days_list.append(active_days)
+                
+                n_obs = window['squared_return'].notna().sum()
+                includes_last_available = last_available_date in window['date'].values
+
+                if n_obs >= 5 or includes_last_available:
+                    rv_sum = window['squared_return'].sum()
+                    active_days = T if includes_last_available else n_obs
+                    rv_list.append(rv_sum)
+                    active_days_list.append(active_days)
+                else:
+                    rv_list.append(np.nan)
+                    active_days_list.append(np.nan)
 
 
         elif days_type() == "c_":
@@ -386,10 +398,20 @@ def calc_realized_var(returns_and_prices, first_day, last_day):
                 mask = (group['date'] >= current_date) & (group['date'] < end_date)
                 window = group.loc[mask]
                 rv_sum = window['squared_return'].sum()
-                active_days = window.shape[0]
-                rv_list.append(rv_sum)
-                active_days_list.append(active_days)
+
+                n_obs = window['squared_return'].notna().sum()
+                includes_last_available = last_available_date in window['date'].values
+
+                if n_obs >= 5 or includes_last_available:
+                    rv_sum = window['squared_return'].sum()
+                    active_days = T if includes_last_available else n_obs
+                    rv_list.append(rv_sum)
+                    active_days_list.append(active_days)
+                else:
+                    rv_list.append(np.nan)
+                    active_days_list.append(np.nan)
         
+
         result = pd.DataFrame({
             'RV_unscaled': rv_list,
             'N_tradingdays': active_days_list
@@ -1019,18 +1041,29 @@ def interpolate_swaps_and_returns(df):
     min_SW = np.minimum(SW1, SW2)
     max_SW = np.maximum(SW1, SW2)
 
-    df["SW_score"] = np.maximum(
-        SW / min_SW, max_SW/SW
-    )
-    # if 1 then the interpolated swap is perfectly close to either swap, accuracy decreases when score increases.
-    # if negative the swap is negative
+    # df["SW_score"] = np.maximum(
+    #     SW / min_SW, max_SW/SW
+    # )
+    # # if 1 then the interpolated swap is perfectly close to either swap, accuracy decreases when score increases.
+    # # if negative the swap is negative
 
-    df = df[
+    # df = df[
+    #     (df["SW_score"] < 3) &
+    #     (df["SW_score"] > 0) &
+    #     (df["high_low_compatibility"] > -0.25) &
+    #     (df["high_low_compatibility"] < 2)
+    # ]
+
+    df.loc[:, "SW_score"] = np.maximum(SW / min_SW, max_SW / SW)
+
+    # Filtrér med .loc og lav eksplicit kopi
+    mask = (
         (df["SW_score"] < 3) &
         (df["SW_score"] > 0) &
         (df["high_low_compatibility"] > -0.25) &
         (df["high_low_compatibility"] < 2)
-    ]
+    )
+    df = df.loc[mask].copy()
 
     theta_29 = ((T - 1) - T1) / (T2 - T1)
     df["SW_0_29"] = SW1 * (1 - theta_29) + SW2 * theta_29
