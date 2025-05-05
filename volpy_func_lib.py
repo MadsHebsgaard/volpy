@@ -1013,8 +1013,9 @@ def high_low_swap_rates(summary_dly_df, od_rdy, n_points=200):
 
 #     return summary_dly_df
 
-
+# load_clean_lib.create_log_with_enty("3")
 def interpolate_swaps_and_returns(df):
+    from vol_strat_lib import T_day_interpolation_CW, T_day_interpolation_linear
     if days_type() == "c_":
         T = 30
     elif days_type() == "t_":
@@ -1026,14 +1027,21 @@ def interpolate_swaps_and_returns(df):
     SW1 = df["low SW"]
     SW2 = df["high SW"]
 
-    theta_30 = np.where(
-        T2 == T1,
-        1,
-        (T - T1) / (T2 - T1)
-    )
-    SW = SW1 * (1 - theta_30) + SW2 * theta_30
-    df["SW_0_30"] = SW
 
+    df["SW_0_30_linear"] = T_day_interpolation_linear(T1, T2, SW1, SW2, t=0)
+    df["theta_linear"] = np.where(
+        T1 == T2,
+        0.5,
+        (T2-(T-0)) / (T2 - T1)
+    )
+
+    df["SW_0_30"] = T_day_interpolation_CW(T1, T2, SW1, SW2, t=0)
+    SW = df["SW_0_30"]
+    df["theta_CW"] = np.where(
+        T1 == T2,
+        0.5,
+        (T1 - 0) * (T2 - T) / ((T2 - T1) * T) * (T/(T-0))
+    )
 
     # Calculating high/low compatibility
     df["high_low_compatibility"] = -(T1 - T) * (T2 - T) * (SW1 - SW2) ** 2 / T ** 2
@@ -1051,13 +1059,6 @@ def interpolate_swaps_and_returns(df):
     # # if 1 then the interpolated swap is perfectly close to either swap, accuracy decreases when score increases.
     # # if negative the swap is negative
 
-    # df = df[
-    #     (df["SW_score"] < 3) &
-    #     (df["SW_score"] > 0) &
-    #     (df["high_low_compatibility"] > -0.25) &
-    #     (df["high_low_compatibility"] < 2)
-    # ]
-
     df.loc[:, "SW_score"] = np.maximum(SW / min_SW, max_SW / SW)
 
     # Filtrér med .loc og lav eksplicit kopi
@@ -1068,17 +1069,19 @@ def interpolate_swaps_and_returns(df):
         (df["high_low_compatibility"] < 2)
     )
     df["Acceptable"] = mask
-    df = df.loc[mask].copy()
 
-    theta_29 = np.where(
-        T2 == T1,
-        1,
-        ((T - 1) - T1) / (T2 - T1)
-    )
-    df["SW_0_29"] = SW1 * (1 - theta_29) + SW2 * theta_29
+    # theta_29 = np.where(
+    #     T2 == T1,
+    #     1,
+    #     ((T - 1) - T1) / (T2 - T1)
+    # )
+    # df["SW_0_29"] = SW1 * (1 - theta_29) + SW2 * theta_29
+    df["SW_0_29_linear"] = T_day_interpolation_linear(T1, T2, SW1, SW2, t=1)
+    df["SW_0_29"] = T_day_interpolation_CW(T1, T2, SW1, SW2, t=1)
 
     #Shifted values
     df["SW_m1_29"] = df.groupby("ticker")["SW_0_30"].shift(1)
+
 
     #discount factor
     df["discount_factor_30d"] = 1 / (1 + df["RF"]) ** (20)
@@ -1090,8 +1093,12 @@ def interpolate_swaps_and_returns(df):
             - df["squared_return"] * 252 * 1 / T  # realiseret variabllt ben
     ) * df["discount_factor_30d"]  # diskonteres
 
+
+    df = df.loc[mask].copy() # Only keep if acceptable
     df["Average SW"] = df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
+
     df["r_30_SW_day"] = df["CF_30_SW_day"] / df["Average SW"]
+
 
     return df
 
@@ -1635,8 +1642,8 @@ def create_sgy_list(sgy_common = "CF_D_30_", sgy_list = ["straddle", "strangle_1
 def return_df(df_big, sgy_list = create_sgy_list(), ticker_list = ["SPX"], extra_columns = []):
     df = df_big[df_big["ticker"].isin(ticker_list)]
 
-    df = df[df["CF_D_30_put_ATM"].isna() == False]
-    df = df[df["CF_D_30_call_ATM"].isna() == False]
+    # df = df[df["CF_D_30_put_ATM"].isna() == False]
+    # df = df[df["CF_D_30_call_ATM"].isna() == False]
 
     col_list = ["ticker", "date", "r_stock"] + sgy_list + extra_columns
     df = df[col_list]
@@ -1720,8 +1727,8 @@ def scale_columns_to_r_stock_average(df, sgy_list, ref_column="r_stock"):
     return df
 
 
-def plot_returns(df, sgy_common, sgy_names, factors):
-    plt.figure(figsize=(30, 10))
+def plot_returns(df, sgy_common, sgy_names, factors, figsize=(30, 10)):
+    plt.figure(figsize=figsize)
 
     for sgy_name in sgy_names:
         sgy_str = sgy_common + sgy_name
@@ -1742,17 +1749,18 @@ def plot_returns(df, sgy_common, sgy_names, factors):
     plt.show()
 
 # missing ticker
-def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strangle_15%", "call_ATM", "put_ATM"], factors=['Mkt', 'SPX', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF'], vol_index = False, sign=True, scale=True, plot = False, ticker_list = None, extra_columns = []):
+def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strangle_15%", "call_ATM", "put_ATM"],
+                   factors=['Mkt', 'SPX', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF'], vol_index = False, sign=True,
+                   scale=True, plot = False, ticker_list = None, extra_columns = [], figsize = (30, 10)):
     if sgy_names is None:
         sgy_names = [col.replace(sgy_common, "") for col in df.columns if sgy_common in col]
 
     if ticker_list == None:
         ticker_list = list(df["ticker"].unique())
 
-
     sgy_list = create_sgy_list(sgy_common, sgy_names)
 
-    df = return_df(df, sgy_list = sgy_list, ticker_list = ticker_list, extra_columns = extra_columns)
+    df = return_df(df, sgy_list = sgy_list, ticker_list = ticker_list, extra_columns = extra_columns) # todo: fix this _
 
     if vol_index:   vol_symbols = load_clean_lib.vol_symbols
     else:           vol_symbols = []
@@ -1765,7 +1773,7 @@ def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strang
 
     if plot:
         factors = [col for col in factors if col != "RF"]
-        plot_returns(df, sgy_common, sgy_names, factors)
+        plot_returns(df, sgy_common, sgy_names, factors, figsize)
 
     return df
 
@@ -2339,11 +2347,11 @@ _ASSET_CLASS = {
     # Equity Markets (0)
     'SPX': 0, 'OEX': 0, 'OEF': 0, "DJX": 0, 'QQQ': 0, 'NDX': 0, 'SPY':0, 'DIA':0, 'VGK': 0, 'FXI': 0, 'EWJ': 0, 'EWZ': 0,
     'INDA': 0, 'EZA': 0, 'EWC': 0, 'EWU': 0, 'EWY': 0, 'EEM': 0,
-    'EWA': 0, 'EWW': 0, 'VNQ': 0,
+    'EWA': 0, 'EWW': 0, 'VNQ': 0, "EFA": 0,
     # Fixed Income (1)
     'TLT': 1, 'SHY': 1, 'TIP': 1, 'LQD': 1, 'HYG': 1, 'EMB': 1,
     # Commodities (2)
-    'IAU': 2, 'SLV': 2, 'UNG': 2, 'USO': 2,
+    'IAU': 2, 'SLV': 2, 'UNG': 2, 'USO': 2, "GLD": 2,
     # Currency (3)
     'UUP': 3, 'FXE': 3, 'FXY': 3, 'CEW': 3,
     # None of the above
@@ -2443,6 +2451,7 @@ name_overrides = {
     "NDX": "NASDAQ 100 Index",
     "DJX": "Dow Jones Ind. Average Index",
     "INDU": "Dow Jones Ind. Average Index",
+    "RUS": "Russell 2000 Index",
 
     # Major ETFs
     "SPY": "S&P 500 ETF",
@@ -2483,6 +2492,8 @@ name_overrides = {
     "CEW": "Emerging Currency ETF",
     "SHY": "iShares 1-3 Year Treasury Bond ETF",
     "TLT": "iShares 20+ Year Treasury Bond ETF",
+    "EFA": "EAFE: Dev. mkt. ex. U.S. and Canada",
+    "GLD":  "Gold ETF",
 }
 
 def ticker_list_to_ordered_map(ticker_list):
@@ -2576,11 +2587,11 @@ OEX_tickers = ["OEX", "OEF", "NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "E
 Cross_AM_tickers = ['GLD', 'EFA', "SPX", "VGK", "EEM", "FXI", "EWJ", "EWZ", "INDA", "EZA", "EWC", "EWU_combined", "EWY", "EWA", "EWW", "VNQ", "TIP", "LQD", "HYG", "EMB", "IAU", "SLV", "UNG", "USO", "UVXY", "UUP", "FXE", "FXY", "BITO", "CEW", "SHY", "TLT"]
 VIX_tickers = ['GLD', 'EFA', 'RUT', 'IBM', 'GS', 'AAPL', 'AMZN', 'GOOG', 'SPX', 'DJX', 'EEM', 'EWZ', 'TLT', 'USO', 'NDX']
 Liquid_ETF_Idx_tickers = Index_tickers + ETF_tickers
-Liquid_stock_tickers = ['BKNG', 'TSLA', 'GOOGL', 'AMZN', 'META', 'OEX', 'NFLX', 'MA',
-       'AAPL', 'AVGO', 'CHTR', 'NVDA', 'ABBV', 'CRM', 'V', 'GS', 'BLK',
-       'GM', 'PM', 'TMUS', 'BA', 'PARA', 'MSFT', 'DE', 'ADBE', 'JPM',
-       'BIIB', 'DIS', 'OXY', 'CAT', 'MET', 'COST', 'ACN', 'COF', 'IBM',
-       'QCOM', 'GILD', 'C', 'UNH', 'BRK', 'CVS', 'WFC']
+Liquid_stock_tickers = ['GOOG', 'BKNG', 'TSLA', 'GOOGL', 'AMZN', 'META', 'OEX', 'NFLX',
+       'PYPL', 'MA', 'AAPL', 'AVGO', 'CHTR', 'NVDA', 'CRM', 'ABBV', 'V',
+       'GS', 'BLK', 'GM', 'PM', 'BA', 'TMUS', 'MSFT', 'PARA', 'ADBE',
+       'DE', 'BIIB', 'DIS', 'JPM', 'CAT', 'OXY', 'COST', 'MET', 'ACN',
+       'COF', 'IBM', 'GILD', 'QCOM', 'C', 'UNH', 'CVS']
 Liquid_tickers = Liquid_ETF_Idx_tickers + Liquid_stock_tickers
 
 
