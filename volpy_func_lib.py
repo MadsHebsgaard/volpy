@@ -1026,7 +1026,11 @@ def interpolate_swaps_and_returns(df):
     SW1 = df["low SW"]
     SW2 = df["high SW"]
 
-    theta_30 = (T - T1) / (T2 - T1)
+    theta_30 = np.where(
+        T2 == T1,
+        1,
+        (T - T1) / (T2 - T1)
+    )
     SW = SW1 * (1 - theta_30) + SW2 * theta_30
     df["SW_0_30"] = SW
 
@@ -1063,9 +1067,14 @@ def interpolate_swaps_and_returns(df):
         (df["high_low_compatibility"] > -0.25) &
         (df["high_low_compatibility"] < 2)
     )
-    df = df.loc[mask].copy()
+    df["Acceptable"] = mask
+    # df = df.loc[mask].copy()
 
-    theta_29 = ((T - 1) - T1) / (T2 - T1)
+    theta_29 = np.where(
+        T2 == T1,
+        1,
+        ((T - 1) - T1) / (T2 - T1)
+    )
     df["SW_0_29"] = SW1 * (1 - theta_29) + SW2 * theta_29
 
     #Shifted values
