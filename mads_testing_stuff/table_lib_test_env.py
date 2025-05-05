@@ -119,13 +119,16 @@ def ff_three_factor_table(returns_df, name,
         g0 = g.dropna(subset=[y_var, "Mkt", "SMB", "HML"])
         if len(g0) > 0:
             X = sm.add_constant(g0[["Mkt", "SMB", "HML"]])
-            fit = (sm.OLS(g0[y_var], X)
-                   .fit(cov_type="HAC", cov_kwds={"maxlags": max_lags}))
-            params = fit.params * TRADING_DAYS
+            if max_lags is None:
+                fit = sm.OLS(g0[y_var], X).fit()
+            else:
+                fit = sm.OLS(g0[y_var], X).fit(cov_type="HAC", cov_kwds={"maxlags": max_lags})
+
+            params = fit.params
             tvals  = fit.tvalues
             r2     = fit.rsquared
             # pull out each coefficient + t-stat
-            alpha, βm, s, h = params["const"], params["Mkt"], params["SMB"], params["HML"]
+            alpha, βm, s, h = params["const"]*TRADING_DAYS, params["Mkt"], params["SMB"], params["HML"]
             tα, tβm, ts, th = tvals["const"], tvals["Mkt"], tvals["SMB"], tvals["HML"]
         else:
             alpha = βm = s = h = tα = tβm = ts = th = r2 = np.nan
@@ -139,7 +142,11 @@ def ff_three_factor_table(returns_df, name,
         })
         records.append(rec)
 
-    df = pd.DataFrame(records).set_index("Ticker")
+    df = pd.DataFrame(records)
+    df.rename(columns={'Ticker': 'ticker'}, inplace=True)
+    df = sort_table_df(df, returns_df, name)
+    df.rename(columns={'ticker': 'Ticker'}, inplace=True)
+    df.set_index("Ticker")
 
     caption = (
         "Explaining variance risk premiums with Fama–French risk factors. "
@@ -163,12 +170,85 @@ def ff_three_factor_table(returns_df, name,
 
 
 
-def save_ff_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
+def save_ff3_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
     tex, df = ff_three_factor_table(returns_df, name, y_var, max_lags = max_lags)
     with open(f"figures/Analysis/table_ff_{name}.tex", "w") as f:
         f.write(tex)
     return df
 
+def ff_five_factor_table(returns_df, name,
+                         y_var="r_30_SW_day", max_lags=0):
+    import numpy as np
+    import pandas as pd
+    import statsmodels.api as sm
 
+    TRADING_DAYS = 252
+    records = []
+    for ticker, g in returns_df.groupby("ticker"):
+        rec = {"Ticker": ticker}
+
+        # require all five factors + the dep var
+        g0 = g.dropna(subset=[y_var, "Mkt", "SMB", "HML", "BAB", "UMD"])
+        if len(g0):
+            X = sm.add_constant(g0[["Mkt","SMB","HML","BAB","UMD"]])
+            fit = sm.OLS(g0[y_var], X)\
+                    .fit(cov_type="HAC", cov_kwds={"maxlags": max_lags})
+            ps = fit.params * np.array([TRADING_DAYS] + [1]*5)
+            ts = fit.tvalues
+            r2 = fit.rsquared
+
+            α, βm, s, h, b_bab, m_umd = ps
+            tα, tβm, tsmb, thml, tbab, tumd = (
+                ts["const"], ts["Mkt"], ts["SMB"], ts["HML"], ts["BAB"], ts["UMD"]
+            )
+        else:
+            α = βm = s = h = b_bab = m_umd = np.nan
+            tα = tβm = tsmb = thml = tbab = tumd = r2 = np.nan
+
+        rec.update({
+            r"\(\alpha\)":      f"{α:.3f}\n({tα:.3f})",
+            r"\(ER^m\)"   :      f"{βm:.3f}\n({tβm:.3f})",
+            r"\mathrm{SMB}":     f"{s:.3f}\n({tsmb:.3f})",
+            r"\mathrm{HML}":     f"{h:.3f}\n({thml:.3f})",
+            r"\mathrm{BAB}":     f"{b_bab:.3f}\n({tbab:.3f})",
+            r"\mathrm{UMD}":     f"{m_umd:.3f}\n({tumd:.3f})",
+            r"\(R^2\)"    :      f"{r2:.3f}",
+        })
+        records.append(rec)
+
+    df = pd.DataFrame(records)
+    df.rename(columns={'Ticker': 'ticker'}, inplace=True)
+    df = sort_table_df(df, returns_df, name)
+    df.rename(columns={'ticker': 'Ticker'}, inplace=True)
+    df.set_index("Ticker")
+
+    caption = (
+        "Explaining variance risk premiums with Fama–French factors plus Betting-Against-Beta and Momentum. "
+        "Entries report the GMM estimates (and t-statistics in parentheses) of "
+        r"$\ln RV_{t,\tau}/SW_{t,\tau}="
+        r"\alpha+\beta ER^m_{t,\tau}+s\,SMB_{t,\tau}+h\,HML_{t,\tau}"
+        r"+b\,BAB_{t,\tau}+m\,UMD_{t,\tau}+e$, "
+        "and unadjusted $R^2$."
+    )
+
+    latex = (
+        df.to_latex(index=True, escape=False, longtable=True,
+                    caption=caption,
+                    label=f"tab:analysis:ff{name}_5f",
+                    column_format="lccccccc",
+                    float_format="%.3f")
+          .splitlines()
+    )
+
+    return "\n".join(["\\scriptsize"] + latex + ["\\normalsize","\\FloatBarrier"]), df
+
+
+
+
+def save_ff5_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
+    tex, df = ff_five_factor_table(returns_df, name, y_var, max_lags = max_lags)
+    with open(f"figures/Analysis/table_ff_{name}.tex", "w") as f:
+        f.write(tex)
+    return df
 
 
