@@ -2320,7 +2320,76 @@ def ticker_to_asset_code(ticker: str) -> int:
     return _ASSET_CLASS.get(ticker, 4)
 
 
-ticker_to_name_Cross_AM = {
+# ticker_to_name_Cross_AM = {
+#     # Indexes
+#     "SPX": "S&P 500 Index",
+#     "OEX": "S&P 100 Index",
+#     "NDX": "NASDAQ 100 Index",
+#     "DJX": "Dow Jones Ind. Average Index",
+#
+#     # Major ETFs
+#     "SPY": "S&P 500 ETF Trust",
+#     "OEF": "S&P 100 ETF",
+#     "QQQ": "NASDAQ 100 Index ETF",
+#     "DIA": "Dow Jones Ind. Average ETF",
+#     "IWM": "Russell 2000 ETF",
+#     "EEM": "Emerging Markets ETF",
+#
+#     # Cross‐market ETFs
+#     "VGK": "Europe ETF",
+#     "FXI": "China ETF",
+#     "EWJ": "Japan ETF",
+#     "EWZ": "Brazil ETF",
+#     "INDA":"India ETF",
+#     "EZA": "South Africa ETF",
+#     "EWC": "Canada ETF",
+#     "EWU": "United Kingdom ETF",
+#     "EWY": "South Korea ETF",
+#     "EWA": "Australia ETF",
+#     "EWW": "Mexico ETF",
+#     "VNQ": "Real Estate ETF",
+#     "TIP": "TIPS Bond ETF",
+#     "LQD": "Investment Grade Corp. Bond ETF",
+#     "HYG": "High Yield Corp. Bond ETF",
+#     "EMB": "Emerging Markets Bond ETF",
+#     "IAU": "Gold Trust",
+#     "SLV": "Silver Trust",
+#     "UNG": "Natural Gas Fund",
+#     "USO": "Oil Fund",
+#     "UVXY": "VIX Short-Term Futures ETF",
+#     "UUP": " US Dollar Trust",
+#     "FXE": " Euro Trust",
+#     "FXY": " Japanese Yen Trust",
+#     "BITO": "Bitcoin ETF",
+# }
+
+# manual overrides: map ticker → ticker_out
+ticker_to_ticker_out = {
+    "DD": "DD (Nem)",
+    "DD_eidp": "DD (Eid)",
+    "DOW_chem": "DOW (Che)",
+    "DOW_inc": "DOW (Inc)",
+    "EWU": "EWU (new)",
+    "EWU_old": "EWU (old)",
+    "S": "S (Sea)",
+    "S_sears": "S (Spr)",
+    "T": "T (Inc)",
+    "T_old": "T (Cor)",
+}
+
+name_overrides = {
+    # Stocks
+    "GOOGL": "Alphabet Inc A",
+    "GOOG": "Alphabet Inc C",
+    "CMCSA": "Comcast Corp A",
+    "CMCSK": "Comcast Corp K",
+    # "IBM":      "International Business Machines Corp",
+    "SGP": "Schering-Plough Corp (Pre MRK merger)",
+    "TFCFA": "Twenty-First Century Fox Inc A",
+    "TFCF": "Twenty-First Century Fox Inc B",
+    "UBAN": "US Bancorp Inc",
+    "USB": "US Bancorp Delaware",
+
     # Indexes
     "SPX": "S&P 500 Index",
     "OEX": "S&P 100 Index",
@@ -2328,22 +2397,22 @@ ticker_to_name_Cross_AM = {
     "DJX": "Dow Jones Ind. Average Index",
 
     # Major ETFs
-    "SPY": "S&P 500 ETF Trust",
+    "SPY": "S&P 500 ETF",
     "OEF": "S&P 100 ETF",
-    "QQQ": "NASDAQ 100 Index ETF",
+    "QQQ": "NASDAQ 100 ETF",
     "DIA": "Dow Jones Ind. Average ETF",
     "IWM": "Russell 2000 ETF",
     "EEM": "Emerging Markets ETF",
 
-    # Cross‐market ETFs
+    # Cross-market ETFs
     "VGK": "Europe ETF",
     "FXI": "China ETF",
     "EWJ": "Japan ETF",
     "EWZ": "Brazil ETF",
-    "INDA":"India ETF",
+    "INDA": "India ETF",
     "EZA": "South Africa ETF",
     "EWC": "Canada ETF",
-    "EWU": "United Kingdom ETF",
+    "EWU": "United Kingdom ETF (new)",
     "EWY": "South Korea ETF",
     "EWA": "Australia ETF",
     "EWW": "Mexico ETF",
@@ -2357,10 +2426,23 @@ ticker_to_name_Cross_AM = {
     "UNG": "Natural Gas Fund",
     "USO": "Oil Fund",
     "UVXY": "VIX Short-Term Futures ETF",
-    "UUP": " US Dollar Trust",
-    "FXE": " Euro Trust",
-    "FXY": " Japanese Yen Trust",
+    "UUP": "US Dollar Trust",
+    "FXE": "Euro Trust",
+    "FXY": "Japanese Yen Trust",
     "BITO": "Bitcoin ETF",
+
+    # further
+    "LIN": "Linde plc",
+    "GX": "Global Crossing LTD",
+    "JCI": "Johnson Controls International plc",
+    "MDT": "Medtronic plc",
+    "COV": "Covidien plc",
+    "ACN": "Accenture plc",
+    "CEW": "Emerging Currency ETF",
+    "EWU_old": "United Kingdom ETF (old)",
+    "INDU": "Dow Jones Industrial Average Index",
+    "SHY": "iShares 1-3 Year Treasury Bond ETF",
+    "TLT": "iShares 20+ Year Treasury Bond ETF",
 }
 
 
@@ -2430,7 +2512,8 @@ ALL_tickers_old = get_unique_tickers([OEX_tickers_old, Cross_AM_tickers_old, VIX
 
 
 # Manual tickers
-All_tickers = ["NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "TMUS", "SCHW", "AMD", "DE", "INTU", "UK", "GT", "TRV", "SHW", "LIN", "GX", "JCI", "MDT", "COV", "ACN", "OEX", "SPX", "DJX", "BITO", "CEW", "DIA", "EEM", "EMB", "EWA", "EWC", "EWJ", "EWU_old", "EWW", "EWY", "EWZ", "EZA", "FXE", "FXI", "FXY", "HYG", "IAU", "INDA", "INDU", "IWM", "LQD", "OEF", "QQQ", "SHY", "SLV", "SPY", "TIP", "TLT", "USO", "UUP", "VGK", "VNQ", "UNG", "UVXY", "NDX", "EWU"]
+All_tickers_original = ["NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "TMUS", "SCHW", "AMD", "DE", "INTU", "UK", "GT", "TRV", "SHW", "LIN", "GX", "JCI", "MDT", "COV", "ACN", "OEX", "SPX", "DJX", "BITO", "CEW", "DIA", "EEM", "EMB", "EWA", "EWC", "EWJ", "EWU_old", "EWW", "EWY", "EWZ", "EZA", "FXE", "FXI", "FXY", "HYG", "IAU", "INDA", "INDU", "IWM", "LQD", "OEF", "QQQ", "SHY", "SLV", "SPY", "TIP", "TLT", "USO", "UUP", "VGK", "VNQ", "UNG", "UVXY", "NDX", "EWU"]
+All_tickers =  ["NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "TMUS", "SCHW", "AMD", "DE", "INTU", "UK", "GT", "TRV", "SHW", "LIN", "GX", "JCI", "MDT", "COV", "ACN", "OEX", "SPX", "DJX", "BITO", "CEW", "DIA", "EEM", "EMB", "EWA", "EWC", "EWJ", "EWW", "EWY", "EWZ", "EZA", "FXE", "FXI", "FXY", "HYG", "IAU", "INDA", "INDU", "IWM", "LQD", "OEF", "QQQ", "SHY", "SLV", "SPY", "TIP", "TLT", "USO", "UUP", "VGK", "VNQ", "UNG", "UVXY", "NDX", "EWU_combined"]
 DJX_tickers = ["DJX", "UK", "DD_eidp", "JPM", "S_sears", "AA", "AXP", "BA", "C", "CAT", "CVX", "DIS", "EK", "GE", "GT", "HON", "HPQ", "IBM", "IP", "JNJ", "KO", "MCD", "MMM", "MO", "MRK", "PG", "RTX", "T", "WMT", "XOM", "T_old", "HD", "INTC", "MSFT", "AIG", "PFE", "VZ", "BAC", "MDLZ", "CSCO", "TRV", "UNH", "GS", "NKE", "V", "AAPL", "DD", "WBA", "DOW_inc", "AMGN", "CRM", "AMZN", "NVDA", "SHW"]
 OEX_tickers = ["OEX", "OEF", "NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JCI", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MDT", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "COV", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "ACN", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "LIN", "TMUS", "SCHW", "AMD", "DE", "INTU"]
 Cross_AM_tickers = ["SPX"]

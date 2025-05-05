@@ -449,3 +449,112 @@ def download_factors():
     import os
     os.makedirs("data", exist_ok=True)
     factor_df.to_csv('data/factor_df.csv', index=False)
+
+def Create_Security_map():
+    '''
+    Dependencies:
+        - bloomberg map.xlsx     (bloomberg data name)
+        - Wrds-OM map.xlsx       (final map done_v2)
+    '''
+
+    base_dir = Option_metrics_path_from_profile()
+    bloomberg_dir = base_dir / "Tickers" / "index data"
+
+    # Load Excel files
+    bloomberg_df = pd.read_excel(bloomberg_dir / "bloomberg map.xlsx")
+    id_map_df = pd.read_excel(bloomberg_dir / "Wrds-OM map.xlsx")
+
+    # Truncate the last two chars of ID_CUSIP and normalize
+    bloomberg_df['cusip_key'] = (
+        bloomberg_df['ID_CUSIP']
+        .astype(str)
+        .str[:-1]  # drop last two characters
+        .str.strip()
+        .str.upper()
+    )
+
+    # also normalize the id_map_df key
+    id_map_df['cusip_key'] = (
+        id_map_df['cusip']
+        .astype(str)
+        .str.strip()
+        .str.upper()
+    )
+
+    # build the lookup (dropping any duplicate keys)
+    name_map = (
+        bloomberg_df
+        .drop_duplicates(subset='cusip_key', keep='first')
+        .set_index('cusip_key')['LONG_COMP_name']
+    )
+
+    # map into a new column 'name'
+    id_map_df['name'] = id_map_df['cusip_key'].map(name_map)
+    id_map_df['name'] = id_map_df['name'].str.replace('/The', '', regex=False)
+
+    # apply lookup, defaulting to the original ticker if not in the dict
+    id_map_df['ticker_out'] = (
+        id_map_df['ticker']
+        .map(vp.ticker_to_ticker_out)
+        .fillna(id_map_df['ticker'])
+    )
+
+    # apply overrides, defaulting to the original name if ticker not in the dict
+    id_map_df['name'] = (
+        id_map_df['ticker']
+        .map(vp.name_overrides)
+        .fillna(id_map_df['name'])
+    )
+    id_map_df["Synthetic"] = False
+    EWU_combined = {
+        "ticker": "EWU_combined",
+        "name": "United Kingdom ETF",
+        "ticker_out": "EWU (full)",
+        "cusip": "46435G334/46428669",
+        "permno": "14907/83216",
+        "secid": "106420",
+        "cusip_key": "46435G334/46428669",
+        "Synthetic": True,
+    }
+    id_map_df = pd.concat([id_map_df, pd.DataFrame([EWU_combined])], ignore_index=True)
+    id_map_df.to_excel(bloomberg_dir / "Security_map.xlsx", index=False)
+
+
+def fix_EWU():
+    base_dir = Option_metrics_path_from_profile()
+    bloomberg_dir = base_dir / "Tickers" / "index data"
+    Input_dir = base_dir / "Tickers" / "Input"
+
+    EWU_old_dir = Input_dir / "EWU_OLD"
+    EWU_new_dir = Input_dir / "EWU"
+
+    EWU_combined_dir = Input_dir / "EWU_combined"
+    EWU_combined_dir.mkdir(parents=True, exist_ok=True)
+
+    for file in EWU_old_dir.iterdir():
+        if not file.is_file():
+            continue
+
+        df_old_path = EWU_old_dir / file.name
+        df_new_path = EWU_new_dir / file.name
+        df_combined_path = EWU_combined_dir / file.name
+
+        df_old = pd.read_csv(df_old_path)
+        df_new = pd.read_csv(df_new_path)
+
+        # merge: simple concat + dedupe
+        df_combined = pd.concat([df_old, df_new], ignore_index=True)
+        df_combined["ticker"] = "EWU_combined"
+        df_combined = df_combined.drop_duplicates()
+
+        # write
+        df_combined.to_csv(df_combined_path, index=False)
+        print(df_combined_path)
+
+
+def create_log_with_enty(message):
+    base_dir = Option_metrics_path_from_profile()
+
+    # add this:
+    log_path = base_dir / "Tickers" / "log.txt"
+    log_path.write_text(message)
