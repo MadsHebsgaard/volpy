@@ -1068,7 +1068,7 @@ def interpolate_swaps_and_returns(df):
         (df["high_low_compatibility"] < 2)
     )
     df["Acceptable"] = mask
-    # df = df.loc[mask].copy()
+    df = df.loc[mask].copy()
 
     theta_29 = np.where(
         T2 == T1,
