@@ -411,7 +411,7 @@ def calc_realized_var(returns_and_prices, first_day, last_day):
                     rv_list.append(np.nan)
                     active_days_list.append(np.nan)
         
-        
+
         result = pd.DataFrame({
             'RV_unscaled': rv_list,
             'N_tradingdays': active_days_list
@@ -766,11 +766,13 @@ def process_group_activity_summary(group):
     #     summary["Inactive reason"] = "min days <= 8 & len < 3"
     #     return group, summary
 
+    
     # # first check if low and high is found
-    # if low_day is None or high_day is None:
-    #     summary["Active"] = False
-    #     summary["Inactive reason"] = "Not 2 close days"
-    #     return group, summary
+    if low_day is None or high_day is None:
+        summary["Active"] = False
+        summary["Inactive reason"] = "No high or low day"
+        return group, summary
+    
 
     # Inaktiv hvis den mindste dag er for stor, med justering baseret på x
     if low_day > 90 - t_bool * 90 * 0.3:
@@ -1039,18 +1041,29 @@ def interpolate_swaps_and_returns(df):
     min_SW = np.minimum(SW1, SW2)
     max_SW = np.maximum(SW1, SW2)
 
-    df["SW_score"] = np.maximum(
-        SW / min_SW, max_SW/SW
-    )
-    # if 1 then the interpolated swap is perfectly close to either swap, accuracy decreases when score increases.
-    # if negative the swap is negative
+    # df["SW_score"] = np.maximum(
+    #     SW / min_SW, max_SW/SW
+    # )
+    # # if 1 then the interpolated swap is perfectly close to either swap, accuracy decreases when score increases.
+    # # if negative the swap is negative
 
-    df = df[
+    # df = df[
+    #     (df["SW_score"] < 3) &
+    #     (df["SW_score"] > 0) &
+    #     (df["high_low_compatibility"] > -0.25) &
+    #     (df["high_low_compatibility"] < 2)
+    # ]
+
+    df.loc[:, "SW_score"] = np.maximum(SW / min_SW, max_SW / SW)
+
+    # Filtrér med .loc og lav eksplicit kopi
+    mask = (
         (df["SW_score"] < 3) &
         (df["SW_score"] > 0) &
         (df["high_low_compatibility"] > -0.25) &
         (df["high_low_compatibility"] < 2)
-    ]
+    )
+    df = df.loc[mask].copy()
 
     theta_29 = ((T - 1) - T1) / (T2 - T1)
     df["SW_0_29"] = SW1 * (1 - theta_29) + SW2 * theta_29
