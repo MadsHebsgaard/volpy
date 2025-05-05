@@ -2422,12 +2422,19 @@ name_overrides = {
     "TFCF": "Twenty-First Century Fox Inc B",
     "UBAN": "US Bancorp Inc",
     "USB": "US Bancorp Delaware",
+    "LIN": "Linde plc",
+    "GX": "Global Crossing LTD",
+    "JCI": "Johnson Controls International plc",
+    "MDT": "Medtronic plc",
+    "COV": "Covidien plc",
+    "ACN": "Accenture plc",
 
     # Indexes
     "SPX": "S&P 500 Index",
     "OEX": "S&P 100 Index",
     "NDX": "NASDAQ 100 Index",
     "DJX": "Dow Jones Ind. Average Index",
+    "INDU": "Dow Jones Ind. Average Index",
 
     # Major ETFs
     "SPY": "S&P 500 ETF",
@@ -2435,10 +2442,10 @@ name_overrides = {
     "QQQ": "NASDAQ 100 ETF",
     "DIA": "Dow Jones Ind. Average ETF",
     "IWM": "Russell 2000 ETF",
-    "EEM": "Emerging Markets ETF",
 
-    # Cross-market ETFs
+    # Cross-market ETPs
     "VGK": "Europe ETF",
+    "EEM": "Emerging Markets ETF",
     "FXI": "China ETF",
     "EWJ": "Japan ETF",
     "EWZ": "Brazil ETF",
@@ -2446,6 +2453,8 @@ name_overrides = {
     "EZA": "South Africa ETF",
     "EWC": "Canada ETF",
     "EWU": "United Kingdom ETF (new)",
+    "EWU_old": "United Kingdom ETF (old)",
+    "EWU_combined": "United Kingdom ETF",
     "EWY": "South Korea ETF",
     "EWA": "Australia ETF",
     "EWW": "Mexico ETF",
@@ -2463,20 +2472,23 @@ name_overrides = {
     "FXE": "Euro Trust",
     "FXY": "Japanese Yen Trust",
     "BITO": "Bitcoin ETF",
-
-    # further
-    "LIN": "Linde plc",
-    "GX": "Global Crossing LTD",
-    "JCI": "Johnson Controls International plc",
-    "MDT": "Medtronic plc",
-    "COV": "Covidien plc",
-    "ACN": "Accenture plc",
     "CEW": "Emerging Currency ETF",
-    "EWU_old": "United Kingdom ETF (old)",
-    "INDU": "Dow Jones Industrial Average Index",
     "SHY": "iShares 1-3 Year Treasury Bond ETF",
     "TLT": "iShares 20+ Year Treasury Bond ETF",
 }
+
+def ticker_list_to_ordered_map(ticker_list):
+    base_dir      = load_clean_lib.Option_metrics_path_from_profile()
+    bloomberg_dir = base_dir / "Tickers" / "index data"
+    security_map  = pd.read_excel(bloomberg_dir / "Security_map.xlsx")
+    # keep only tickers in the list, then reindex to preserve the list order
+    security_map = (
+        security_map
+        .set_index("ticker")
+        .loc[ticker_list]          # filters & orders by ticker_list
+        .reset_index()             # bring 'ticker' back as a column
+    )
+    return security_map
 
 
 def Index_ETF_stock(name):
@@ -2490,29 +2502,29 @@ def Index_ETF_stock_list(name_list):
 
 
 
-from pathlib import Path
-def ticker_to_name_CSV(ticker):
-    base_dir = load_clean_lib.Option_metrics_path_from_profile()
-    df_path = Path(base_dir) / "Tickers" / "Input" / ticker / "returns and stock price.csv"
+# from pathlib import Path
+# def ticker_to_name_CSV(ticker):
+#     base_dir = load_clean_lib.Option_metrics_path_from_profile()
+#     df_path = Path(base_dir) / "Tickers" / "Input" / ticker / "returns and stock price.csv"
+#
+#     if ticker not in OEX_tickers: #Cross_AM_tickers + Liquid_ETF_Idx_tickers:
+#         name = ticker_to_name_Cross_AM.get(ticker, ticker)
+#     else:
+#         # ensure the file exists
+#         if not df_path.is_file():
+#             print(f"No CSV found for ticker '{ticker}' at {df_path}")
+#             return ''
+#
+#         df = pd.read_csv(df_path)
+#
+#         # grab the first value in the 'issuer' column and return it
+#         name = df['issuer'].iloc[0]
+#         name = name.title()
+#
+#     return name
 
-    if ticker not in OEX_tickers: #Cross_AM_tickers + Liquid_ETF_Idx_tickers:
-        name = ticker_to_name_Cross_AM.get(ticker, ticker)
-    else:
-        # ensure the file exists
-        if not df_path.is_file():
-            print(f"No CSV found for ticker '{ticker}' at {df_path}")
-            return ''
-
-        df = pd.read_csv(df_path)
-
-        # grab the first value in the 'issuer' column and return it
-        name = df['issuer'].iloc[0]
-        name = name.title()
-
-    return name
-
-def ticker_list_to_name_list(ticker_list):
-    return [ticker_to_name_CSV(ticker) for ticker in ticker_list]
+# def ticker_list_to_name_list(ticker_list):
+#     return [ticker_to_name_CSV(ticker) for ticker in ticker_list]
 
 
 
@@ -2535,25 +2547,45 @@ OEX_tickers_old = ["OEX", "OEF", "AA", "AAPL", "ABBV", "ABT", "ACN", "ADBE", "AE
 Cross_AM_tickers_old =  ["SPX", "VGK", "FXI", "EWJ", "EWZ", "INDA", "EZA", "EWC", "EEM", "EWU", "EWY", "EWA", "EWW", "VNQ", "TIP", "LQD", "HYG", "EMB", "IAU", "SLV", "UNG", "USO", "UVXY", "UUP", "FXE", "FXY", "BITO" ]
 VIX_tickers_old = ["SPX", "GOOGL", "AMZN", "DIA", "IWM", "QQQ", "AAPL", "EWZ", "USO", "GS", "EEM", "FXE", "SLV", "IBM"]
 DJX_tickers_old = ["DJX", "AA", "AAPL", "AIG", "AMGN", "AMZN", "AXP", "BA", "BAC", "C", "CAT", "CRM", "CSCO", "CVX", "DD", "DIS", "DOW", "GE", "GM", "GS", "GT", "HD", "HON", "HPQ", "IBM", "INTC", "IP", "JNJ", "JPM", "KO", "MCD", "MMM", "MO", "MRK", "MSFT", "NKE", "PFE", "PG", "RTX", "S", "T", "TRV", "UK", "UNH", "V", "VZ", "WBA", "WMT", "XOM"]
+Index_tickers = ["SPX", "OEX", "NDX", "DJX"]
+ETF_tickers   = ["SPY", "OEF", "QQQ", "DIA"]
 
-Index_tickers_old = ["SPX", "OEX", "NDX", "DJX"]
-ETF_tickers_old   = ["SPY", "OEF", "QQQ", "DIA"]
 Liquid_stock_tickers_old = ['GOOG', 'BKNG', 'TSLA', 'GOOGL', 'AMZN', 'META', 'NFLX', 'MA', 'PYPL', 'AAPL', 'AVGO', 'CHTR', 'NVDA', 'CRM', 'ABBV', 'HCA', 'V', 'GS', 'WB', 'GM', 'PM', 'MSFT', 'PARA', 'BA', 'ADBE', 'TMUS', 'OXY', 'MET', 'DE', 'DAL', 'BIIB', 'JPM', 'CAT', 'DIS', 'COST', 'COF', 'IBM', 'QCOM', 'GILD', 'ACN', 'UNH', 'C']
-Liquid_ETF_Idx_tickers_old = Index_tickers_old + ETF_tickers_old
-Liquid_tickers = Liquid_ETF_Idx_tickers_old + Liquid_stock_tickers_old
+Liquid_ETF_Idx_tickers_old = Index_tickers + ETF_tickers
+Liquid_tickers_old = Liquid_ETF_Idx_tickers_old + Liquid_stock_tickers_old
 ALL_tickers_old = get_unique_tickers([OEX_tickers_old, Cross_AM_tickers_old, VIX_tickers_old, DJX_tickers_old, Liquid_ETF_Idx_tickers_old])
 
 
+
 # Manual tickers
+# all
 All_tickers_original = ["NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "TMUS", "SCHW", "AMD", "DE", "INTU", "UK", "GT", "TRV", "SHW", "LIN", "GX", "JCI", "MDT", "COV", "ACN", "OEX", "SPX", "DJX", "BITO", "CEW", "DIA", "EEM", "EMB", "EWA", "EWC", "EWJ", "EWU_old", "EWW", "EWY", "EWZ", "EZA", "FXE", "FXI", "FXY", "HYG", "IAU", "INDA", "INDU", "IWM", "LQD", "OEF", "QQQ", "SHY", "SLV", "SPY", "TIP", "TLT", "USO", "UUP", "VGK", "VNQ", "UNG", "UVXY", "NDX", "EWU"]
 All_tickers =  ["GLD", "EFA", "RUT","NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "TMUS", "SCHW", "AMD", "DE", "INTU", "UK", "GT", "TRV", "SHW", "LIN", "GX", "JCI", "MDT", "COV", "ACN", "OEX", "SPX", "DJX", "BITO", "CEW", "DIA", "EEM", "EMB", "EWA", "EWC", "EWJ", "EWW", "EWY", "EWZ", "EZA", "FXE", "FXI", "FXY", "HYG", "IAU", "INDA", "INDU", "IWM", "LQD", "OEF", "QQQ", "SHY", "SLV", "SPY", "TIP", "TLT", "USO", "UUP", "VGK", "VNQ", "UNG", "UVXY", "NDX", "EWU_combined"]
 DJX_tickers = ["DJX", "UK", "DD_eidp", "JPM", "S_sears", "AA", "AXP", "BA", "C", "CAT", "CVX", "DIS", "EK", "GE", "GT", "HON", "HPQ", "IBM", "IP", "JNJ", "KO", "MCD", "MMM", "MO", "MRK", "PG", "RTX", "T", "WMT", "XOM", "T_old", "HD", "INTC", "MSFT", "AIG", "PFE", "VZ", "BAC", "MDLZ", "CSCO", "TRV", "UNH", "GS", "NKE", "V", "AAPL", "DD", "WBA", "DOW_inc", "AMGN", "CRM", "AMZN", "NVDA", "SHW"]
 OEX_tickers = ["OEX", "OEF", "NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JCI", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MDT", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "COV", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "ACN", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "LIN", "TMUS", "SCHW", "AMD", "DE", "INTU"]
-Cross_AM_tickers = ["SPX"]
+
+# Cross-AM, VIX and Liquid ticker sets
+Cross_AM_tickers = ['GLD', 'EFA', "SPX", "VGK", "EEM", "FXI", "EWJ", "EWZ", "INDA", "EZA", "EWC", "EWU_combined", "EWY", "EWA", "EWW", "VNQ", "TIP", "LQD", "HYG", "EMB", "IAU", "SLV", "UNG", "USO", "UVXY", "UUP", "FXE", "FXY", "BITO", "CEW", "SHY", "TLT"]
+VIX_tickers = ['GLD', 'EFA', 'RUT', 'IBM', 'GS', 'AAPL', 'AMZN', 'GOOG', 'SPX', 'DJX', 'EEM', 'EWZ', 'TLT', 'USO', 'NDX']
+Liquid_ETF_Idx_tickers = Index_tickers + ETF_tickers
+Liquid_stock_tickers = ['BKNG', 'TSLA', 'GOOGL', 'AMZN', 'META', 'OEX', 'NFLX', 'MA',
+       'AAPL', 'AVGO', 'CHTR', 'NVDA', 'ABBV', 'CRM', 'V', 'GS', 'BLK',
+       'GM', 'PM', 'TMUS', 'BA', 'PARA', 'MSFT', 'DE', 'ADBE', 'JPM',
+       'BIIB', 'DIS', 'OXY', 'CAT', 'MET', 'COST', 'ACN', 'COF', 'IBM',
+       'QCOM', 'GILD', 'C', 'UNH', 'BRK', 'CVS', 'WFC']
+Liquid_tickers = Liquid_ETF_Idx_tickers + Liquid_stock_tickers
+
+
+
+
+
+
+
+
+
+
+
 Market_tickers = DJX_tickers + OEX_tickers
-
-
-
 
 
 Car_wu_tickers = ["SPX", "OEX", "DJX", "NDX", "QQQ", "MSFT", "INTC", "IBM", "AMER", "DELL",

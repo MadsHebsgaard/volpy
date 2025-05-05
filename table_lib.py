@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import os
 import volpy_func_lib as vp
-from load_clean_lib import etf_to_underlying, ticker_to_vol
+from load_clean_lib import ticker_to_vol
 from volpy_func_lib import Cross_AM_tickers
 
 
@@ -202,7 +202,7 @@ def table_dataset_list_strike_count_pages(df, name, width_scale=0.75):
     table_df["Q1_K"] = table_df["Q1_K"].round(1)
     table_df["Q5_K"] = table_df["Q5_K"].round(1)
     table_df["Q10_K"] = table_df["Q10_K"].round(1)
-    table_df["Name"] = [name.replace("&", r"\&") for name in vp.ticker_list_to_name_list(table_df["ticker"])]
+    table_df["Name"] = [name.replace("&", r"\&") for name in vp.ticker_list_to_ordered_map(table_df["ticker"])["name"]]
 
     # LaTeX generation
     raw = table_df.to_latex(index=False, header=False, float_format="%.1f")
@@ -368,6 +368,7 @@ def CarrWu2009_table_2(df, name):
 
     # sort
     out = sort_table_df(out, df, name)
+    out["ticker"] = vp.ticker_list_to_ordered_map(out["ticker"])["ticker_out"]
 
     # 3) generate & save LaTeX
     latex = CarrWu2009_table_2_latex_v2(out, name)   # now returns a string
@@ -744,14 +745,12 @@ def CarrWu2009_table_3_latex(table_df):
 
 
 import load_clean_lib
-etf_to_underlying = load_clean_lib.etf_to_underlying
-ticker_to_vol = load_clean_lib.ticker_to_vol
 
 def vix_table(df):
     results = []
     df = df[df["ticker"] != "TLT"]
 
-    for ticker, vol in ticker_to_vol.items():
+    for ticker, vol in load_clean_lib.ticker_to_vol.items():
         sw_col = f"SW_0_30"  # Adjust based on actual column names
         iv_col = vol
         df_ticker = df[df["ticker"] == ticker].copy()
@@ -780,7 +779,7 @@ def vix_table(df):
         results.append({
             'ETF/Index': ticker,
             'Vol Index': vol,
-            'Underlying': etf_to_underlying[ticker],
+            'Underlying': vp.ticker_list_to_ordered_map([ticker])["name"],
             'start_date': start_date,
             'end_date': end_date,
             'SW': sw_mean * 100,
