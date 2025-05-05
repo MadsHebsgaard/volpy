@@ -1090,9 +1090,8 @@ def interpolate_swaps_and_returns(df):
             - df["squared_return"] * 252 * 1 / T  # realiseret variabllt ben
     ) * df["discount_factor_30d"]  # diskonteres
 
-    avg_sw = df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
-    df["r_30_SW_day"] = df["CF_30_SW_day"] / avg_sw
-
+    df["Average SW"] = df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
+    df["r_30_SW_day"] = df["CF_30_SW_day"] / df["Average SW"]
 
     return df
 
