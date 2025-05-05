@@ -640,7 +640,6 @@ def _process_one_ticker(
 
 # import traceback
 
-# load_clean_lib.create_log_with_enty("1")
 def load_analyze_create_swap_ticker_parallel(
     ticker_list: list[str],
     IV_type: str = "om",

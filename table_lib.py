@@ -277,7 +277,7 @@ def table_dataset_list_strike_count_pages(df, name, width_scale=0.75):
     return table_df
 
 sort_map = {
-    "VIX":      False,
+    "VIX":      True,
     "Cross-AM": True,
     "OEX":      True,
     "Liquid":   True,
@@ -538,7 +538,7 @@ def CarrWu2009_table_3(df, name):
     df["lnratio"] = np.log(df["RV"]) - np.log(df["SW_0_30"])
 
     # 1) add this helper right after newey_west_t_stat
-    def newey_west_std(series, lag=30):
+    def newey_west_std(series, lag=21):
         x = np.asarray(series)
         n = len(x)
         if n == 0:
@@ -607,7 +607,7 @@ def CarrWu2009_table_3(df, name):
     # Merge & sort
     out = pd.merge(df_diff, df_ln, on="ticker", how="inner")
     out = sort_table_df(out, df, name)
-
+    out["ticker"] = vp.ticker_list_to_ordered_map(out["ticker"])["ticker_out"]
 
     # 3) Generate LaTeX and write file
     latex = CarrWu2009_table_3_latex_v2(out, name)
@@ -856,60 +856,455 @@ def latex_vix_table(df):
 
 
 
-def generate_latex_for_pairs(df):
-    """
-    Generate LaTeX code for figure pairs given a DataFrame with a 'ticker' column,
-    and save it to 'figures/vix/vix_figure_latex_code.tex'.
-    """
-    output_dir = "figures/vix"
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, "vix_figure_latex_code.tex")
 
-    tickers = list(df["ticker"].unique())
-    pairs = [tickers[i:i + 2] for i in range(0, len(tickers), 2)]
+import os
+def table_3_daily(df, name):
+    # ensure output dir
+    os.makedirs("figures/Analysis", exist_ok=True)
 
-    figs = [
-        {"suffix": " vs vix", "caption": "Level"},
-        {"suffix": " - vix", "caption": r"Difference ($\varepsilon = \text{IV}^{\text{Cboe}} - \text{SW}$)"},
-        {"suffix": " - vix scaled", "caption": r"Scaled difference ($\frac{\varepsilon}{\text{IV}^{\text{Cboe}}} = \frac{\text{IV}^{\text{Cboe}} - \text{SW}}{\text{IV}^{\text{Cboe}}}$)"}
+    # 1) Prep the data
+    df = df.dropna(subset=["CF_30_SW_day", "r_30_SW_day"]).copy()
+
+    # 2) in your compute_stats(), capture this NW std
+    def compute_stats(series):
+        n = len(series)
+        mean_ = series.mean()
+        std_ = series.std(ddof=1)
+        se_ = std_ / np.sqrt(n)  # standard error of the mean
+        auto_ = series.autocorr(lag=1)
+        skew_ = series.skew()
+        kurt_ = series.kurt()
+        t_ = mean_/se_
+        return pd.Series({
+            "Mean": mean_,
+            "Std": std_,
+            "Auto": auto_,
+            "Skew": skew_,
+            "Kurt": kurt_,
+            "t": t_,
+        })
+
+    # Panel A: (RV - SW_0_30) × 100
+    df_CF = (
+        df
+        .groupby("ticker", group_keys=False)
+        .apply(lambda g: compute_stats(g["CF_30_SW_day"] * 100))
+        .reset_index()
+    )
+    df_CF.columns = [
+        "ticker",
+        "Mean_CF", "Std_CF", "Auto_CF",
+        "Skew_CF", "Kurt_CF", "t_CF"
     ]
 
-    latex = []
-    for t1, t2 in pairs:
-        u1 = etf_to_underlying.get(t1, t1)
-        u2 = etf_to_underlying.get(t2, t2)
-        v1 = ticker_to_vol.get(t1, "")
-        v2 = ticker_to_vol.get(t2, "")
+    # Panel B: ln(RV / SW_0_30)
+    df_r = (
+        df
+        .groupby("ticker", group_keys=False)
+        .apply(lambda g: compute_stats(g["r_30_SW_day"]))
+        .reset_index()
+    )
+    df_r.columns = ["ticker", "Mean_r", "Std_r", "Auto_r", "Skew_r", "Kurt_r", "t_r"]
 
-        latex.append(f"\\subsection{{{u1} and {u2}}}")
-        for fig in figs:
-            latex.append("\\begin{figure}[!ht]")
-            latex.append("  \\hspace{0.4cm}")
-            latex.append("  \\makebox[\\textwidth][c]{%")
-            for idx, (t, u, v) in zip(['a', 'b'], [(t1, u1, v1), (t2, u2, v2)]):
-                suffix = fig["suffix"]
-                fname = f"ticker SW{suffix} ({t}).pdf"
-                latex.append(f"    \\begin{{minipage}}[b]{{0.55\\linewidth}}")
-                latex.append("      \\centering")
-                latex.append(
-                    f"      \\includegraphics[width=\\linewidth]{{figures/vix/{fname}}}")
-                latex.append("      \\captionsetup{skip=0pt}")
-                latex.append(f"      \\caption*{{{idx}) {u} ({t}/{v})}}")
-                latex.append("    \\end{minipage}")
-                if idx == 'a':
-                    latex.append("    \\hfill")
-            latex.append("  }")
-            caption = fig["caption"]
-            label_key = caption.split()[0].lower()
-            latex.append(f"  \\caption{{{caption}}}")
-            latex.append(f"  \\label{{fig:{t1}_{t2}_{label_key}}}")
-            latex.append("\\end{figure}")
-            latex.append("")
-        latex.append("\\clearpage")
+    # Compute Sharpe ratios for Panel B
+    df_r["SR_ann"] = -df_r["Mean_r"] / df_r["Std_r"] * np.sqrt(252)
 
-    # Write the LaTeX to the file
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(latex))
+    # Merge & sort
+    out = pd.merge(df_CF, df_r, on="ticker", how="inner")
+    out = sort_table_df(out, df, name)
+    out["ticker"] = vp.ticker_list_to_ordered_map(out["ticker"])["ticker_out"]
+
+    # 3) Generate LaTeX and write file
+    latex = table_3_daily_latex(out, name)
+    with open(f"figures/Analysis/{name}_table_3_daily.tex", "w") as f:
+        f.write(latex)
+
+    return out
+
+
+def table_3_daily_latex(table_df, name):
+    """
+    Generates a longtable with:
+      - Line number
+      - Panel A: (RV - SW) × 100 (Mean, Std. dev., Auto, Skew, Kurt, t)
+      - Panel B: ln(RV / SW) (Mean, Std. dev., Auto, Skew, Kurt, t, SR)
+    """
+    # 1) Reorder & set up MultiIndex
+    table_df = table_df[
+        [
+            "ticker",
+            "Mean_CF", "Std_CF", "Auto_CF", "Skew_CF", "Kurt_CF", "t_CF",
+            "Mean_r",   "Std_r",   "Auto_r",   "Skew_r",   "Kurt_r",   "t_r",  "SR_ann"
+        ]
+    ]
+    # insert line numbers
+    table_df.insert(0, ("", "No."), range(1, len(table_df) + 1))
+    # rename columns to a two‐level header
+    table_df.columns = pd.MultiIndex.from_tuples([
+        ("",                           "No."),
+        ("",                       "Ticker"),
+        ("Panel A: (RV – SW) × 100",   "Mean"),
+        ("Panel A: (RV – SW) × 100",   "Std. dev."),
+        ("Panel A: (RV – SW) × 100",   "Auto"),
+        ("Panel A: (RV – SW) × 100",   "Skew"),
+        ("Panel A: (RV – SW) × 100",   "Kurt"),
+        ("Panel A: (RV – SW) × 100",     "t"),
+        ("Panel B: ln(RV / SW)",        "Mean"),
+        ("Panel B: ln(RV / SW)",        "Std. dev."),
+        ("Panel B: ln(RV / SW)",        "Auto"),
+        ("Panel B: ln(RV / SW)",        "Skew"),
+        ("Panel B: ln(RV / SW)",        "Kurt"),
+        ("Panel B: ln(RV / SW)",        "t"),
+        ("Panel B: ln(RV / SW)",        "SR")
+    ])
+
+    # 2) Export as longtable
+    latex = table_df.to_latex(
+        index=False,
+        float_format="%.2f",
+        multicolumn=True,
+        multirow=True,
+        longtable=True,
+        caption=(
+            rf"Summary statistics for..."
+            #rf"Summary statistics for (RV – SW) $\times$ 100 and ln(RV / SW) for the {name} dataset. "
+            #"Each panel shows Mean, Std. dev., Auto(1), Skew, Kurt, and t-statistic; "
+            #"Panel B also reports an annualized Sharpe ratio (SR)."
+        ),
+        label=f"tab:analysis:Summary statistics CF and r ({name})",
+        column_format='rlcccccc||ccccccc',
+        multicolumn_format="c"
+    )
+
+    # 3) Inject cmidrule under the top header
+    lines = latex.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip().startswith(r'\toprule'):
+            # after \toprule and the next header line
+            lines.insert(i + 2, r'\cmidrule(lr){3-8}\cmidrule(lr){9-15}')
+            break
+
+    # 4) Add size commands & float barrier
+    lines.insert(0, r'\scriptsize')
+    lines.append(r'\normalsize')
+    lines.append(r'\FloatBarrier')
+
+    return "\n".join(lines)
+
+
+
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+import volpy_func_lib as vp
+from table_lib import sort_table_df
+
+def capm_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
+    TRADING_DAYS = 252
+    records = []
+    for ticker, g in returns_df.groupby("ticker"):
+        rec = {"Ticker": ticker}
+
+        # Panel A: SPX
+        gA = g.dropna(subset=[y_var, "SPX"])
+        if len(gA) > 0:
+            X = sm.add_constant(gA["SPX"])
+            if max_lags is None:
+                fit = sm.OLS(gA[y_var], X).fit()
+            else:
+                fit = sm.OLS(gA[y_var], X).fit(cov_type="HAC", cov_kwds={"maxlags": max_lags})
+            a, b = fit.params
+            ta, tb = fit.tvalues
+            r2 = fit.rsquared
+        else:
+            a = b = ta = tb = r2 = np.nan
+
+        ann_a = a * TRADING_DAYS
+
+        rec.update({
+            ("Panel A: SPX", r"\(\alpha\)"): f"{ann_a:.3f}\n({ta:.3f})",
+            ("Panel A: SPX", r"\(\beta\)"): f"{b:.3f}\n({tb:.3f})",
+            ("Panel A: SPX", r"\(R^2\)"): f"{r2:.3f}"
+        })
+
+        # Panel B: Mkt
+        gB = g.dropna(subset=[y_var, "Mkt"])
+        if len(gB) > 0:
+            X = sm.add_constant(gB["Mkt"])
+            if max_lags is None:
+                fit = sm.OLS(gB[y_var], X).fit()
+            else:
+                fit = sm.OLS(gB[y_var], X).fit(cov_type="HAC", cov_kwds={"maxlags": max_lags})
+            a, b = fit.params
+            ta, tb = fit.tvalues
+            r2 = fit.rsquared
+        else:
+            a = b = ta = tb = r2 = np.nan
+
+        ann_a = a * TRADING_DAYS
+
+        rec.update({
+            ("Panel B: Mkt", r"\(\alpha\)"): f"{ann_a:.3f}\n({ta:.3f})",
+            ("Panel B: Mkt", r"\(\beta\)"): f"{b:.3f}\n({tb:.3f})",
+            ("Panel B: Mkt", r"\(R^2\)"): f"{r2:.3f}"
+        })
+
+        records.append(rec)
+
+    df = pd.DataFrame(records)
+    df.rename(columns={'Ticker': 'ticker'}, inplace=True)
+    df = sort_table_df(df, returns_df, name)
+    df["ticker"] = vp.ticker_list_to_ordered_map(df["ticker"])["ticker"]
+    df.rename(columns={'ticker': 'Ticker'}, inplace=True)
+    df = df.set_index("Ticker")
+    # ensure proper MultiIndex on columns
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+
+    latex = df.to_latex(
+        index=True,
+        escape=False,
+        multicolumn=True,
+        multirow=True,
+        longtable=True,
+        caption=(
+            "Explaining variance risk premiums with CAPM beta. "
+            "Each panel reports the GMM estimates (and t-statistics in parentheses) of "
+            "$r_{30\\_SW\\_day}=\\alpha+\\beta\\times \\mathrm{(SPX\\ or\\ Mkt)} + e$, "
+            "and unadjusted $R^2$."
+        ),
+        label=f"tab:analysis:beta{name}",
+        column_format="l" + "ccc" * 2,
+        multicolumn_format="c",
+        float_format="%.3f",
+    ).splitlines()
+
+    # insert cmidrules under the top header
+    for i, L in enumerate(latex):
+        if L.strip().startswith(r"\toprule"):
+            # after \toprule and the next header line
+            latex.insert(i + 2, r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}")
+            break
+
+    # add sizing & float barrier
+    out = ["\scriptsize"] + latex + ["\\normalsize", r"\FloatBarrier"]
+    return "\n".join(out), df
+
+
+def save_capm_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
+    tex, df = capm_table(returns_df, name, y_var, max_lags = max_lags)
+    with open(f"figures/Analysis/{name}_table_CAPM.tex", "w") as f:
+        f.write(tex)
+    return df
+
+
+
+
+def ff_three_factor_table(returns_df, name,
+                          y_var="r_30_SW_day", max_lags=0):
+    import numpy as np
+    import pandas as pd
+    import statsmodels.api as sm
+
+    TRADING_DAYS = 252
+    records = []
+    for ticker, g in returns_df.groupby("ticker"):
+        rec = {"Ticker": ticker}
+        # drop any row with a missing regressor or dependent
+        g0 = g.dropna(subset=[y_var, "Mkt", "SMB", "HML"])
+        if len(g0) > 0:
+            X = sm.add_constant(g0[["Mkt", "SMB", "HML"]])
+            if max_lags is None:
+                fit = sm.OLS(g0[y_var], X).fit()
+            else:
+                fit = sm.OLS(g0[y_var], X).fit(cov_type="HAC", cov_kwds={"maxlags": max_lags})
+
+            params = fit.params
+            tvals  = fit.tvalues
+            r2     = fit.rsquared
+            # pull out each coefficient + t-stat
+            alpha, βm, s, h = params["const"]*TRADING_DAYS, params["Mkt"], params["SMB"], params["HML"]
+            tα, tβm, ts, th = tvals["const"], tvals["Mkt"], tvals["SMB"], tvals["HML"]
+        else:
+            alpha = βm = s = h = tα = tβm = ts = th = r2 = np.nan
+
+        rec.update({
+            r"\(\alpha\)": f"{alpha:.3f}\n({tα:.3f})",
+            r"\(ER^m\)"   : f"{βm:.3f}\n({tβm:.3f})",
+            r"\mathrm{SMB}": f"{s:.3f}\n({ts:.3f})",
+            r"\mathrm{HML}": f"{h:.3f}\n({th:.3f})",
+            r"\(R^2\)"    : f"{r2:.3f}",
+        })
+        records.append(rec)
+
+    df = pd.DataFrame(records)
+    df.rename(columns={'Ticker': 'ticker'}, inplace=True)
+    df = sort_table_df(df, returns_df, name)
+    df["ticker"] = vp.ticker_list_to_ordered_map(df["ticker"])["ticker"]
+    df.rename(columns={'ticker': 'Ticker'}, inplace=True)
+    df.set_index("Ticker")
+
+    caption = (
+        "Explaining variance risk premiums with Fama–French risk factors. "
+        "Entries report the GMM estimates (and t-statistics in parentheses) of "
+        r"$\ln RV_{t,\tau}/SW_{t,\tau} = \alpha + \beta\,ER^m_{t,\tau} + s\,SMB_{t,\tau} + h\,HML_{t,\tau} + e$, "
+        "and unadjusted $R^2$."
+    )
+
+    latex = (
+        df.to_latex(index=True, escape=False, longtable=True,
+                    caption=caption,
+                    label=f"tab:analysis:ff{name}",
+                    column_format="lccccc",
+                    float_format="%.3f")
+          .splitlines()
+    )
+
+    # wrap in scriptsize + float barrier
+    out = ["\\scriptsize"] + latex + ["\\normalsize", "\\FloatBarrier"]
+    return "\n".join(out), df
+
+
+
+def save_ff3_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
+    tex, df = ff_three_factor_table(returns_df, name, y_var, max_lags = max_lags)
+    with open(f"figures/Analysis/{name}_table_ff3.tex", "w") as f:
+        f.write(tex)
+    return df
+
+def ff_five_factor_table(returns_df, name,
+                         y_var="r_30_SW_day", max_lags=0):
+    import numpy as np
+    import pandas as pd
+    import statsmodels.api as sm
+
+    TRADING_DAYS = 252
+    records = []
+    for ticker, g in returns_df.groupby("ticker"):
+        rec = {"Ticker": ticker}
+
+        # require all five factors + the dep var
+        g0 = g.dropna(subset=[y_var, "Mkt", "SMB", "HML", "BAB", "UMD"])
+        if len(g0):
+            X = sm.add_constant(g0[["Mkt","SMB","HML","BAB","UMD"]])
+            fit = sm.OLS(g0[y_var], X)\
+                    .fit(cov_type="HAC", cov_kwds={"maxlags": max_lags})
+            ps = fit.params * np.array([TRADING_DAYS] + [1]*5)
+            ts = fit.tvalues
+            r2 = fit.rsquared
+
+            α, βm, s, h, b_bab, m_umd = ps
+            tα, tβm, tsmb, thml, tbab, tumd = (
+                ts["const"], ts["Mkt"], ts["SMB"], ts["HML"], ts["BAB"], ts["UMD"]
+            )
+        else:
+            α = βm = s = h = b_bab = m_umd = np.nan
+            tα = tβm = tsmb = thml = tbab = tumd = r2 = np.nan
+
+        rec.update({
+            r"\(\alpha\)":      f"{α:.3f}\n({tα:.3f})",
+            r"\(ER^m\)"   :      f"{βm:.3f}\n({tβm:.3f})",
+            r"\mathrm{SMB}":     f"{s:.3f}\n({tsmb:.3f})",
+            r"\mathrm{HML}":     f"{h:.3f}\n({thml:.3f})",
+            r"\mathrm{BAB}":     f"{b_bab:.3f}\n({tbab:.3f})",
+            r"\mathrm{UMD}":     f"{m_umd:.3f}\n({tumd:.3f})",
+            r"\(R^2\)"    :      f"{r2:.3f}",
+        })
+        records.append(rec)
+
+    df = pd.DataFrame(records)
+    df.rename(columns={'Ticker': 'ticker'}, inplace=True)
+    df = sort_table_df(df, returns_df, name)
+    df["ticker"] = vp.ticker_list_to_ordered_map(df["ticker"])["ticker"]
+    df.rename(columns={'ticker': 'Ticker'}, inplace=True)
+
+    df.set_index("Ticker")
+
+    caption = (
+        "Explaining variance risk premiums with Fama–French factors plus Betting-Against-Beta and Momentum. "
+        "Entries report the GMM estimates (and t-statistics in parentheses) of "
+        r"$\ln RV_{t,\tau}/SW_{t,\tau}="
+        r"\alpha+\beta ER^m_{t,\tau}+s\,SMB_{t,\tau}+h\,HML_{t,\tau}"
+        r"+b\,BAB_{t,\tau}+m\,UMD_{t,\tau}+e$, "
+        "and unadjusted $R^2$."
+    )
+
+    latex = (
+        df.to_latex(index=True, escape=False, longtable=True,
+                    caption=caption,
+                    label=f"tab:analysis:ff{name}_5f",
+                    column_format="lccccccc",
+                    float_format="%.3f")
+          .splitlines()
+    )
+
+    return "\n".join(["\\scriptsize"] + latex + ["\\normalsize","\\FloatBarrier"]), df
+
+
+
+
+def save_ff5_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
+    tex, df = ff_five_factor_table(returns_df, name, y_var, max_lags = max_lags)
+    with open(f"figures/Analysis/{name}_table_ff5.tex", "w") as f:
+        f.write(tex)
+    return df
+
+
+
+
+# def generate_latex_for_pairs(df):
+#     """
+#     Generate LaTeX code for figure pairs given a DataFrame with a 'ticker' column,
+#     and save it to 'figures/vix/vix_figure_latex_code.tex'.
+#     """
+#     output_dir = "figures/vix"
+#     os.makedirs(output_dir, exist_ok=True)
+#     output_path = os.path.join(output_dir, "vix_figure_latex_code.tex")
+#
+#     tickers = list(df["ticker"].unique())
+#     pairs = [tickers[i:i + 2] for i in range(0, len(tickers), 2)]
+#
+#     figs = [
+#         {"suffix": " vs vix", "caption": "Level"},
+#         {"suffix": " - vix", "caption": r"Difference ($\varepsilon = \text{IV}^{\text{Cboe}} - \text{SW}$)"},
+#         {"suffix": " - vix scaled", "caption": r"Scaled difference ($\frac{\varepsilon}{\text{IV}^{\text{Cboe}}} = \frac{\text{IV}^{\text{Cboe}} - \text{SW}}{\text{IV}^{\text{Cboe}}}$)"}
+#     ]
+#
+#     latex = []
+#     for t1, t2 in pairs:
+#         u1 = etf_to_underlying.get(t1, t1)
+#         u2 = etf_to_underlying.get(t2, t2)
+#         v1 = ticker_to_vol.get(t1, "")
+#         v2 = ticker_to_vol.get(t2, "")
+#
+#         latex.append(f"\\subsection{{{u1} and {u2}}}")
+#         for fig in figs:
+#             latex.append("\\begin{figure}[!ht]")
+#             latex.append("  \\hspace{0.4cm}")
+#             latex.append("  \\makebox[\\textwidth][c]{%")
+#             for idx, (t, u, v) in zip(['a', 'b'], [(t1, u1, v1), (t2, u2, v2)]):
+#                 suffix = fig["suffix"]
+#                 fname = f"ticker SW{suffix} ({t}).pdf"
+#                 latex.append(f"    \\begin{{minipage}}[b]{{0.55\\linewidth}}")
+#                 latex.append("      \\centering")
+#                 latex.append(
+#                     f"      \\includegraphics[width=\\linewidth]{{figures/vix/{fname}}}")
+#                 latex.append("      \\captionsetup{skip=0pt}")
+#                 latex.append(f"      \\caption*{{{idx}) {u} ({t}/{v})}}")
+#                 latex.append("    \\end{minipage}")
+#                 if idx == 'a':
+#                     latex.append("    \\hfill")
+#             latex.append("  }")
+#             caption = fig["caption"]
+#             label_key = caption.split()[0].lower()
+#             latex.append(f"  \\caption{{{caption}}}")
+#             latex.append(f"  \\label{{fig:{t1}_{t2}_{label_key}}}")
+#             latex.append("\\end{figure}")
+#             latex.append("")
+#         latex.append("\\clearpage")
+#
+#     # Write the LaTeX to the file
+#     with open(output_path, "w", encoding="utf-8") as f:
+#         f.write("\n".join(latex))
 
 
 

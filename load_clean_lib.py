@@ -444,8 +444,8 @@ def download_factors():
 def Create_Security_map():
     '''
     Dependencies:
-        - bloomberg map.xlsx     (bloomberg data name)
-        - Wrds-OM map.xlsx       (final map done_v2)
+        - bloomberg map.xlsx     (bloomberg data for de forskellige (bloomberg) tickers)
+        - Wrds-OM map.xlsx       (forskellige id og tickers for hvert aktiv)
     '''
 
     base_dir = Option_metrics_path_from_profile()
