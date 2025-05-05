@@ -489,6 +489,7 @@ def create_summary_dly_df_ticker(od, returns_and_prices, RF, n_grid=200):
     # Add risk-free rate of the given date
     summary_dly_df = summary_dly_df.merge(RF[['date', 'RF']], on='date', how='left')
 
+
     # Realized vol calculation
     real_vol = vp.calc_realized_var(returns_and_prices, first_day, last_day)
 
@@ -612,6 +613,7 @@ def _process_one_ticker(
             IV_type=IV_type, safe_slow_IV=safe_slow_IV,
         )
 
+        
         # 2) Summarize into daily frame + ready-to-use od
         summary_dly_df, od_rdy = create_summary_dly_df_ticker(
             od, returns_and_prices, RF, n_grid=2000
@@ -798,44 +800,107 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from volpy_func_ticker_lib import days_type
 
 
-def fix_index_returns_bloomberg_OM(ticker_list=["SPX","NDX","OEX","DJX"]):
-    base_dir   = load_clean_lib.Option_metrics_path_from_profile()
-    input_dir  = base_dir / "Tickers" / "Input"
+# def fix_index_returns_bloomberg_OM(ticker_list=["SPX","NDX","OEX","DJX"]):
+#     base_dir   = load_clean_lib.Option_metrics_path_from_profile()
+#     input_dir  = base_dir / "Tickers" / "Input"
+#     index_data_dir = base_dir / "Tickers" / "index data"
+#     OM_returns_dir = base_dir / "Tickers" / "Returns OM"
+#     input_ticker_dir = base_dir / "Tickers" / "Input"
+
+#     for ticker in ticker_list:
+#         OM_path      = OM_returns_dir / ticker / 'returns and stock price OM.csv'
+#         Bloomberg_path = index_data_dir / f'{ticker}.csv'
+#         if not OM_path.exists():
+#             print(f"File {OM_path!r} not found; skipping ticker.")
+#             continue
+
+#         # load
+#         df_OM        = pd.read_csv(OM_path)
+#         df_Bloomberg = pd.read_csv(Bloomberg_path)
+
+#         # parse dates
+#         df_OM['date']      = pd.to_datetime(df_OM['date'],      dayfirst=False)
+#         df_Bloomberg['date'] = pd.to_datetime(df_Bloomberg['date'], dayfirst=False)
+#         df_Bloomberg = df_Bloomberg[df_Bloomberg["return"].isna()==False]
+
+#         # # keep old return around
+#         # df_CRSP['return_old'] = df_CRSP['return']
+
+#         # OPTION A: overwrite in-place via index alignment
+#         df_OM.set_index('date', inplace=True)
+#         df_OM['return'] = df_Bloomberg.set_index('date')['return']
+#         df_OM.reset_index(inplace=True)
+
+#         # optional: sort by date
+#         df_OM.sort_values('date', inplace=True)
+
+#         # save
+#         save_dir = input_ticker_dir / ticker / 'returns and stock price.csv'
+#         df_OM.to_csv(save_dir, index=False)
+#         print(f"{ticker!r} (returns and stock price.csv) fixed.")
+
+
+import pandas as pd
+
+def fix_index_returns_bloomberg_OM(ticker_list=["SPX", "NDX", "OEX", "DJX"]):
+    base_dir = load_clean_lib.Option_metrics_path_from_profile()
     index_data_dir = base_dir / "Tickers" / "index data"
     OM_returns_dir = base_dir / "Tickers" / "Returns OM"
     input_ticker_dir = base_dir / "Tickers" / "Input"
 
     for ticker in ticker_list:
-        OM_path      = OM_returns_dir / ticker / 'returns and stock price OM.csv'
+        OM_path = OM_returns_dir / ticker / 'returns and stock price OM.csv'
         Bloomberg_path = index_data_dir / f'{ticker}.csv'
         if not OM_path.exists():
             print(f"File {OM_path!r} not found; skipping ticker.")
             continue
 
-        # load
-        df_OM        = pd.read_csv(OM_path)
+        # Load data
+        df_OM = pd.read_csv(OM_path)
         df_Bloomberg = pd.read_csv(Bloomberg_path)
 
-        # parse dates
-        df_OM['date']      = pd.to_datetime(df_OM['date'],      dayfirst=False)
-        df_Bloomberg['date'] = pd.to_datetime(df_Bloomberg['date'], dayfirst=False)
-        df_Bloomberg = df_Bloomberg[df_Bloomberg["return"].isna()==False]
+        # Parse dates
+        df_OM["date"] = pd.to_datetime(df_OM["date"], dayfirst=False)
+        df_Bloomberg["date"] = pd.to_datetime(df_Bloomberg["date"], dayfirst=False)
+        df_Bloomberg = df_Bloomberg[df_Bloomberg["return"].notna()]
 
-        # # keep old return around
-        # df_CRSP['return_old'] = df_CRSP['return']
+        # Find dato-grænser
+        latest_om_date = df_OM["date"].max()
+        earliest_om_date = df_OM["date"].min()
+        cutoff_date = latest_om_date + pd.Timedelta(days=60)
 
-        # OPTION A: overwrite in-place via index alignment
-        df_OM.set_index('date', inplace=True)
-        df_OM['return'] = df_Bloomberg.set_index('date')['return']
-        df_OM.reset_index(inplace=True)
+        # Filtrér Bloomberg
+        df_Bloomberg = df_Bloomberg[df_Bloomberg["date"] <= cutoff_date]
 
-        # optional: sort by date
-        df_OM.sort_values('date', inplace=True)
+        # Lav all_dates = OM-datoer + ekstra Bloomberg-datoer
+        om_dates = df_OM["date"].unique()
+        bb_extra_dates = df_Bloomberg[df_Bloomberg["date"] > latest_om_date]["date"].unique()
+        all_dates = pd.Series(pd.to_datetime(list(set(om_dates).union(set(bb_extra_dates))))).sort_values()
+        all_dates = pd.DataFrame({"date": all_dates})
 
-        # save
-        save_dir = input_ticker_dir / ticker / 'returns and stock price.csv'
-        df_OM.to_csv(save_dir, index=False)
-        print(f"{ticker!r} (returns and stock price.csv) fixed.")
+        # Merge for at få komplet datasæt
+        df_extended = pd.merge(all_dates, df_OM, on="date", how="left")
+
+        # Merge Bloomberg return ind
+        df_extended = df_extended.merge(
+            df_Bloomberg[["date", "return"]],
+            on="date",
+            how="left",
+            suffixes=("", "_bb")
+        )
+
+        # Overwrite return med Bloomberg-return
+        df_extended["return"] = df_extended["return_bb"]
+        df_extended.drop(columns=["return_bb"], inplace=True)
+
+        # Sortér og gem
+        df_extended.sort_values("date", inplace=True)
+        save_path = input_ticker_dir / ticker / 'returns and stock price.csv'
+        df_extended.to_csv(save_path, index=False)
+
+        # Info
+        n_added = df_extended["date"].gt(latest_om_date).sum()
+        print(f"{ticker!r} (returns and stock price.csv) fixed — {n_added} ekstra Bloomberg-dage tilføjet.")
 
 
 
