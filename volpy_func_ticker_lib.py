@@ -540,7 +540,7 @@ def load_analyze_create_swap_ticker(ticker_list, IV_type="om", safe_slow_IV=Fals
         od, returns_and_prices, od_raw = load_clean_and_prepare_od_ticker(ticker, valid_dates, ZCY_curves, IV_type=IV_type, safe_slow_IV=safe_slow_IV)
 
         # Calculate results such as SW, RV ect.
-        summary_dly_df, od_rdy = create_summary_dly_df_ticker(od, returns_and_prices, RF, n_grid=2000)
+        summary_dly_df, od_rdy = create_summary_dly_df_ticker(od, returns_and_prices, RF, n_grid=10000)
 
         summary_dly_df = vp.interpolate_swaps_and_returns(summary_dly_df)
         summary_dly_df = summary_dly_df.reset_index()
