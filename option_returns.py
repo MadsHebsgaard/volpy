@@ -4,7 +4,7 @@ import numpy as np
 
 import load_clean_lib
 from global_settings import *
-from vol_strat_lib import T_day_interpolation
+from vol_strat_lib import T_day_interpolation_CW
 
 def Calculate_CashFlow(df, current_price, next_price):
     return (next_price - (1+df["RF"]) * current_price).shift(1)
@@ -82,7 +82,7 @@ def D_PC_option_prices(df, OTMs):
                 for D_str in ["D_", ""]:
                     low_price_time = df[f"{D_str}low_{put_call}_{moneyness}_price{time}"]
                     high_price_time = df[f"{D_str}high_{put_call}_{moneyness}_price{time}"]
-                    df[f"{D_str}30_{put_call}_{moneyness}_price{time}"] = T_day_interpolation(T1=T1, T2=T2, r1=low_price_time, r2=high_price_time)
+                    df[f"{D_str}30_{put_call}_{moneyness}_price{time}"] = T_day_interpolation_CW(T1=T1, T2=T2, r1=low_price_time, r2=high_price_time)
     return df
 
 def add_stock_sgy(df):

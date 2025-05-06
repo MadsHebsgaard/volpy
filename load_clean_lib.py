@@ -268,61 +268,52 @@ def create_summary_dly_df(od, returns_and_prices, first_day=None, last_day=None,
     return summary_dly_df, od_rdy
 
 
-vol_symbols = [
-            "VIX",    # S&P500
-            "VXN",    # Nasdaq-100
-            "RVX",    # Russell 2000
-            "VXD",    # DJIA
-            "EVZ",    # Euro
-            "VXEWZ",  # Brazil
-            "VXEEM",  # Emerging Markets
-            "VIXTLT", # 20+ Yr U.S. Treasuries
-            "VXSLV",  # Silver
-            "OVX",    # Crude Oil
-            "VXAPL",  # Apple
-            "VXAZN",  # Amazon
-            "VXGOG",  # Google
-            "VXGS",   # Goldman Sachs
-            "VXIBM"   # IBM
-        ]
 
-# Mapping from ETF to underlying asset
-etf_to_underlying = {
-    "SPX": "S\\&P 500",
-    "QQQ": "Nasdaq‑100",
-    "IWM": "Russell 2000",
-    "DIA": "Dow J. Ind. Avg.",
-    "FXE": "Euro Currency",
-    "EWZ": "Brazil Eq.",
-    "EEM": "EM Eq.",
-    "TLT": "20+ Yr U.S. Treasuries",
-    "SLV": "Silver",
-    "USO": "Crude Oil",
-    "AAPL":  "Apple Inc.",
-    "AMZN":  "Amazon.com Inc.",
-    "GOOGL": "Alphabet Inc.",
-    "GS":    "Goldman Sachs Group",
-    "IBM":    "Intern. B. Machines"
-}
+# # Old Volatility index mapping
+# old_ticker_to_vol = {
+#     "SPX": "VIX",
+#     "QQQ": "VXN",
+#     "IWM": "RVX",
+#     "DIA": "VXD",
+#     "FXE": "EVZ",
+#     "EWZ": "VXEWZ",
+#     "EEM": "VXEEM",
+#     "TLT": "VIXTLT",
+#     "SLV": "VXSLV",
+#     "USO": "OVX",
+#     "AAPL":  "VXAPL",
+#     "AMZN":  "VXAZN",
+#     "GOOG": "VXGOG",
+#     "GS":    "VXGS",
+#     "IBM":   "VXIBM"
+# }
 
-# Volatility index mapping
+
+# Mapping from underlying asset ticker to Cboe volatility index ticker
 ticker_to_vol = {
-    "SPX": "VIX",
-    "QQQ": "VXN",
-    "IWM": "RVX",
-    "DIA": "VXD",
-    "FXE": "EVZ",
-    "EWZ": "VXEWZ",
-    "EEM": "VXEEM",
-    "TLT": "VIXTLT",
-    "SLV": "VXSLV",
-    "USO": "OVX",
-    "AAPL":  "VXAPL",
-    "AMZN":  "VXAZN",
-    "GOOGL": "VXGOG",
-    "GS":    "VXGS",
-    "IBM":   "VXIBM"
+    "SPX":  "VIX",      # S&P500 → Cboe VIX
+    "GLD":  "GVZ",    # SPDR Gold Shares ETF → Cboe Gold ETF Volatility Index
+    "USO":  "OVX",    # United States Oil Fund ETF → Cboe Crude Oil ETF Volatility Index
+    "RUT":  "RVX",    # Russell 2000 Index → Cboe Russell 2000 Volatility Index
+    "AAPL": "VXAPL",  # Apple Inc. → Cboe Apple VIX Index
+    "AMZN": "VXAZN",  # Amazon.com Inc. → Cboe Amazon VIX Index
+    "DJX":  "VXD",    # Dow Jones Industrial Average → Cboe Dow Jones Industrial Average Volatility Index
+    "GOOG": "VXGOG",  # Alphabet Inc. Class C → Cboe Google VIX Index
+    "GS":   "VXGS",   # Goldman Sachs Group Inc. → Cboe Goldman Sachs VIX Index
+    "IBM":  "VXIBM",  # IBM Corp. → Cboe IBM VIX Index
+    "NDX":  "VXN",    # Nasdaq-100® Index → Cboe Nasdaq-100 Volatility Index
+    "TLT":  "VXTLT",  # iShares 20+ Year Treasury Bond ETF → Cboe 20+ Year Treasury Bond ETF Volatility Index
+    "EWZ":  "VXEWZ",  # iShares Brazil ETF → Cboe Brazil ETF Volatility Index
+    "EEM":  "VXEEM",  # iShares MSCI Emerging Markets ETF → Cboe Emerging Markets ETF Volatility Index
+    "EFA":  "VXEFA",  # iShares MSCI EAFE ETF → Cboe EFA ETF Volatility Index
+    "VIX":  "VVIX",   # Cboe Volatility Index → Cboe VVIX Index
 }
+vol_symbols = list(ticker_to_vol.values())
+
+# mangler GLD, EFA og returns for RUT
+
+
+
 
 
 def ticker_to_vol_symbol(s):
@@ -453,8 +444,8 @@ def download_factors():
 def Create_Security_map():
     '''
     Dependencies:
-        - bloomberg map.xlsx     (bloomberg data name)
-        - Wrds-OM map.xlsx       (final map done_v2)
+        - bloomberg map.xlsx     (bloomberg data for de forskellige (bloomberg) tickers)
+        - Wrds-OM map.xlsx       (forskellige id og tickers for hvert aktiv)
     '''
 
     base_dir = Option_metrics_path_from_profile()
@@ -505,11 +496,14 @@ def Create_Security_map():
         .map(vp.name_overrides)
         .fillna(id_map_df['name'])
     )
+
+    id_map_df["Cboe vol ticker"] = id_map_df["ticker"].map(ticker_to_vol)
+
     id_map_df["Synthetic"] = False
     EWU_combined = {
         "ticker": "EWU_combined",
         "name": "United Kingdom ETF",
-        "ticker_out": "EWU (full)",
+        "ticker_out": "EWU",
         "cusip": "46435G334/46428669",
         "permno": "14907/83216",
         "secid": "106420",

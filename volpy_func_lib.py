@@ -488,7 +488,7 @@ def compute_rates_for_date(group, ZCY_curves):
         return group
     except Exception:
         import traceback, sys
-        print(f"\n🔥  ERROR in compute_rates_for_date for date {current_date!r} 🔥", file=sys.stderr)
+        print(f"\nERROR in compute_rates_for_date for date {current_date!r}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
         # re-raise so the ProcessPoolExecutor still knows it failed
         raise
@@ -1013,8 +1013,9 @@ def high_low_swap_rates(summary_dly_df, od_rdy, n_points=200):
 
 #     return summary_dly_df
 
-
+# load_clean_lib.create_log_with_enty("3")
 def interpolate_swaps_and_returns(df):
+    from vol_strat_lib import T_day_interpolation_CW, T_day_interpolation_linear
     if days_type() == "c_":
         T = 30
     elif days_type() == "t_":
@@ -1026,10 +1027,21 @@ def interpolate_swaps_and_returns(df):
     SW1 = df["low SW"]
     SW2 = df["high SW"]
 
-    theta_30 = (T - T1) / (T2 - T1)
-    SW = SW1 * (1 - theta_30) + SW2 * theta_30
-    df["SW_0_30"] = SW
 
+    df["SW_0_30_linear"] = T_day_interpolation_linear(T1, T2, SW1, SW2, t=0)
+    df["theta_linear"] = np.where(
+        T1 == T2,
+        0.5,
+        (T2-(T-0)) / (T2 - T1)
+    )
+
+    df["SW_0_30"] = T_day_interpolation_CW(T1, T2, SW1, SW2, t=0)
+    SW = df["SW_0_30"]
+    df["theta_CW"] = np.where(
+        T1 == T2,
+        0.5,
+        (T1 - 0) * (T2 - T) / ((T2 - T1) * T) * (T/(T-0))
+    )
 
     # Calculating high/low compatibility
     df["high_low_compatibility"] = -(T1 - T) * (T2 - T) * (SW1 - SW2) ** 2 / T ** 2
@@ -1047,13 +1059,6 @@ def interpolate_swaps_and_returns(df):
     # # if 1 then the interpolated swap is perfectly close to either swap, accuracy decreases when score increases.
     # # if negative the swap is negative
 
-    # df = df[
-    #     (df["SW_score"] < 3) &
-    #     (df["SW_score"] > 0) &
-    #     (df["high_low_compatibility"] > -0.25) &
-    #     (df["high_low_compatibility"] < 2)
-    # ]
-
     df.loc[:, "SW_score"] = np.maximum(SW / min_SW, max_SW / SW)
 
     # Filtrér med .loc og lav eksplicit kopi
@@ -1063,13 +1068,20 @@ def interpolate_swaps_and_returns(df):
         (df["high_low_compatibility"] > -0.25) &
         (df["high_low_compatibility"] < 2)
     )
-    df = df.loc[mask].copy()
+    df["Acceptable"] = mask
 
-    theta_29 = ((T - 1) - T1) / (T2 - T1)
-    df["SW_0_29"] = SW1 * (1 - theta_29) + SW2 * theta_29
+    # theta_29 = np.where(
+    #     T2 == T1,
+    #     1,
+    #     ((T - 1) - T1) / (T2 - T1)
+    # )
+    # df["SW_0_29"] = SW1 * (1 - theta_29) + SW2 * theta_29
+    df["SW_0_29_linear"] = T_day_interpolation_linear(T1, T2, SW1, SW2, t=1)
+    df["SW_0_29"] = T_day_interpolation_CW(T1, T2, SW1, SW2, t=1)
 
     #Shifted values
     df["SW_m1_29"] = df.groupby("ticker")["SW_0_30"].shift(1)
+
 
     #discount factor
     df["discount_factor_30d"] = 1 / (1 + df["RF"]) ** (20)
@@ -1081,8 +1093,30 @@ def interpolate_swaps_and_returns(df):
             - df["squared_return"] * 252 * 1 / T  # realiseret variabllt ben
     ) * df["discount_factor_30d"]  # diskonteres
 
-    avg_sw = df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
-    df["r_30_SW_day"] = df["CF_30_SW_day"] / avg_sw
+    # Casflow version baseret på markedsværdi af en daglig (-short) swap = long
+    df["CF_30_SW_day_noRF"] = - (
+            df["SW_m1_29"]  # fast ben er det samme
+            - df["SW_0_29"] * (T - 1) / T  # ny "rest" variabelt ben
+            - df["squared_return"] * 252 * 1 / T  # realiseret variabllt ben
+    )
+
+    df = df.loc[mask].copy() # Only keep if acceptable
+    df["Average SW"] = df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
+    df["EWMA SW 87.5%"] = df["SW_m1_29"].ewm(alpha=0.095, min_periods=5, adjust=False).mean()
+    df["EWMA SW 80%"] = df["SW_m1_29"].ewm(alpha=0.075, min_periods=5, adjust=False).mean()
+    df["EWMA SW 66%"] = df["SW_m1_29"].ewm(alpha=0.55, min_periods=5, adjust=False).mean()
+
+    df["r_30_SW_day"] = df["CF_30_SW_day"] / df["Average SW"]
+    df["r_30_SW_day_noRF"] = df["CF_30_SW_day_noRF"] / df["Average SW"]
+
+    df["r_30_SW_day 87.5%"] = df["CF_30_SW_day"] / df["EWMA SW 87.5%"]
+    df["r_30_SW_day_noRF 87.5%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 87.5%"]
+
+    df["r_30_SW_day 80%"] = df["CF_30_SW_day"] / df["EWMA SW 80%"]
+    df["r_30_SW_day_noRF 80%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 80%"]
+
+    df["r_30_SW_day 66%"] = df["CF_30_SW_day"] / df["EWMA SW 66%"]
+    df["r_30_SW_day_noRF 66%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 66%"]
 
 
     return df
@@ -1101,29 +1135,26 @@ def add_calcs_to_files(filename_list):
         for ticker in file_dir.iterdir():
             df = pd.read_csv(file_dir / f"{ticker}")
 
-            T1 = df["low days"]
-            T2 = df["high days"]
-            SW1 = df["low SW"]
-            SW2 = df["high SW"]
-            SW = df["SW_0_30"]
+            df["r_30_SW_day old"] = df["CF_30_SW_day"] / df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
+            df["r_30_SW_day_noRF old"] = df["CF_30_SW_day_noRF"] / df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
 
+            df["Average SW"] = df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
+            df["EWMA SW 87.5%"] = df["SW_m1_29"].ewm(alpha=0.095, min_periods=5, adjust=False).mean()
+            df["EWMA SW 80%"] = df["SW_m1_29"].ewm(alpha=0.075, min_periods=5, adjust=False).mean()
+            df["EWMA SW 66%"] = df["SW_m1_29"].ewm(alpha=0.55, min_periods=5, adjust=False).mean()
 
-            # Calculating high/low compatibility
-            df["high_low_compatibility"] = -(T1 - T) * (T2 - T) * (SW1 - SW2)**2 / T**2
-            # If positive they are good (interpolating from either side), yet best if closer to 0
-            # if negative they are bad, getting worse as the compatibility decreases.
-            # If 0 the swap is either low/high SW or the rates of both are identical, in which case the swap rate time curve could be convex or concave leading to some interpolation error still.
+            df["r_30_SW_day"] = df["CF_30_SW_day"] / df["Average SW"]
+            df["r_30_SW_day_noRF"] = df["CF_30_SW_day_noRF"] / df["Average SW"]
 
-            # Calculating SW score
-            min_SW = np.minimum(SW1, SW2)
-            max_SW = np.maximum(SW1, SW2)
+            df["r_30_SW_day 87.5%"] = df["CF_30_SW_day"] / df["EWMA SW 87.5%"]
+            df["r_30_SW_day_noRF 87.5%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 87.5%"]
 
-            df["SW_score"] = np.maximum(
-                SW / min_SW,
-                max_SW / SW
-            )
-            # if 1 then the interpolated swap is perfectly close to either swap, accuracy decreases when score increases.
-            # if negative the swap is negative
+            df["r_30_SW_day 80%"] = df["CF_30_SW_day"] / df["EWMA SW 80%"]
+            df["r_30_SW_day_noRF 80%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 80%"]
+
+            df["r_30_SW_day 66%"] = df["CF_30_SW_day"] / df["EWMA SW 66%"]
+            df["r_30_SW_day_noRF 66%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 66%"]
+
             df.to_csv(file_dir / f"{ticker}")
         print(f"finished with {filename}")
 
@@ -1627,8 +1658,8 @@ def create_sgy_list(sgy_common = "CF_D_30_", sgy_list = ["straddle", "strangle_1
 def return_df(df_big, sgy_list = create_sgy_list(), ticker_list = ["SPX"], extra_columns = []):
     df = df_big[df_big["ticker"].isin(ticker_list)]
 
-    df = df[df["CF_D_30_put_ATM"].isna() == False]
-    df = df[df["CF_D_30_call_ATM"].isna() == False]
+    # df = df[df["CF_D_30_put_ATM"].isna() == False]
+    # df = df[df["CF_D_30_call_ATM"].isna() == False]
 
     col_list = ["ticker", "date", "r_stock"] + sgy_list + extra_columns
     df = df[col_list]
@@ -1712,8 +1743,8 @@ def scale_columns_to_r_stock_average(df, sgy_list, ref_column="r_stock"):
     return df
 
 
-def plot_returns(df, sgy_common, sgy_names, factors):
-    plt.figure(figsize=(30, 10))
+def plot_returns(df, sgy_common, sgy_names, factors, figsize=(30, 10)):
+    plt.figure(figsize=figsize)
 
     for sgy_name in sgy_names:
         sgy_str = sgy_common + sgy_name
@@ -1734,13 +1765,14 @@ def plot_returns(df, sgy_common, sgy_names, factors):
     plt.show()
 
 # missing ticker
-def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strangle_15%", "call_ATM", "put_ATM"], factors=['Mkt', 'SPX', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF'], vol_index = False, sign=True, scale=True, plot = False, ticker_list = None, extra_columns = []):
+def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strangle_15%", "call_ATM", "put_ATM"],
+                   factors=['Mkt', 'SPX', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF'], vol_index = False, sign=True,
+                   scale=True, plot = False, ticker_list = None, extra_columns = [], figsize = (30, 10)):
     if sgy_names is None:
         sgy_names = [col.replace(sgy_common, "") for col in df.columns if sgy_common in col]
 
     if ticker_list == None:
         ticker_list = list(df["ticker"].unique())
-
 
     sgy_list = create_sgy_list(sgy_common, sgy_names)
 
@@ -1757,7 +1789,7 @@ def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strang
 
     if plot:
         factors = [col for col in factors if col != "RF"]
-        plot_returns(df, sgy_common, sgy_names, factors)
+        plot_returns(df, sgy_common, sgy_names, factors, figsize)
 
     return df
 
@@ -2331,11 +2363,11 @@ _ASSET_CLASS = {
     # Equity Markets (0)
     'SPX': 0, 'OEX': 0, 'OEF': 0, "DJX": 0, 'QQQ': 0, 'NDX': 0, 'SPY':0, 'DIA':0, 'VGK': 0, 'FXI': 0, 'EWJ': 0, 'EWZ': 0,
     'INDA': 0, 'EZA': 0, 'EWC': 0, 'EWU': 0, 'EWY': 0, 'EEM': 0,
-    'EWA': 0, 'EWW': 0, 'VNQ': 0,
+    'EWA': 0, 'EWW': 0, 'VNQ': 0, "EFA": 0,
     # Fixed Income (1)
     'TLT': 1, 'SHY': 1, 'TIP': 1, 'LQD': 1, 'HYG': 1, 'EMB': 1,
     # Commodities (2)
-    'IAU': 2, 'SLV': 2, 'UNG': 2, 'USO': 2,
+    'IAU': 2, 'SLV': 2, 'UNG': 2, 'USO': 2, "GLD": 2,
     # Currency (3)
     'UUP': 3, 'FXE': 3, 'FXY': 3, 'CEW': 3,
     # None of the above
@@ -2422,12 +2454,20 @@ name_overrides = {
     "TFCF": "Twenty-First Century Fox Inc B",
     "UBAN": "US Bancorp Inc",
     "USB": "US Bancorp Delaware",
+    "LIN": "Linde plc",
+    "GX": "Global Crossing LTD",
+    "JCI": "Johnson Controls International plc",
+    "MDT": "Medtronic plc",
+    "COV": "Covidien plc",
+    "ACN": "Accenture plc",
 
     # Indexes
     "SPX": "S&P 500 Index",
     "OEX": "S&P 100 Index",
     "NDX": "NASDAQ 100 Index",
     "DJX": "Dow Jones Ind. Average Index",
+    "INDU": "Dow Jones Ind. Average Index",
+    "RUS": "Russell 2000 Index",
 
     # Major ETFs
     "SPY": "S&P 500 ETF",
@@ -2435,10 +2475,10 @@ name_overrides = {
     "QQQ": "NASDAQ 100 ETF",
     "DIA": "Dow Jones Ind. Average ETF",
     "IWM": "Russell 2000 ETF",
-    "EEM": "Emerging Markets ETF",
 
-    # Cross-market ETFs
+    # Cross-market ETPs
     "VGK": "Europe ETF",
+    "EEM": "Emerging Markets ETF",
     "FXI": "China ETF",
     "EWJ": "Japan ETF",
     "EWZ": "Brazil ETF",
@@ -2446,6 +2486,8 @@ name_overrides = {
     "EZA": "South Africa ETF",
     "EWC": "Canada ETF",
     "EWU": "United Kingdom ETF (new)",
+    "EWU_old": "United Kingdom ETF (old)",
+    "EWU_combined": "United Kingdom ETF",
     "EWY": "South Korea ETF",
     "EWA": "Australia ETF",
     "EWW": "Mexico ETF",
@@ -2463,20 +2505,25 @@ name_overrides = {
     "FXE": "Euro Trust",
     "FXY": "Japanese Yen Trust",
     "BITO": "Bitcoin ETF",
-
-    # further
-    "LIN": "Linde plc",
-    "GX": "Global Crossing LTD",
-    "JCI": "Johnson Controls International plc",
-    "MDT": "Medtronic plc",
-    "COV": "Covidien plc",
-    "ACN": "Accenture plc",
     "CEW": "Emerging Currency ETF",
-    "EWU_old": "United Kingdom ETF (old)",
-    "INDU": "Dow Jones Industrial Average Index",
     "SHY": "iShares 1-3 Year Treasury Bond ETF",
     "TLT": "iShares 20+ Year Treasury Bond ETF",
+    "EFA": "EAFE: Dev. mkt. ex. U.S. and Canada",
+    "GLD":  "Gold ETF",
 }
+
+def ticker_list_to_ordered_map(ticker_list):
+    base_dir      = load_clean_lib.Option_metrics_path_from_profile()
+    bloomberg_dir = base_dir / "Tickers" / "index data"
+    security_map  = pd.read_excel(bloomberg_dir / "Security_map.xlsx")
+    # keep only tickers in the list, then reindex to preserve the list order
+    security_map = (
+        security_map
+        .set_index("ticker")
+        .loc[ticker_list]          # filters & orders by ticker_list
+        .reset_index()             # bring 'ticker' back as a column
+    )
+    return security_map
 
 
 def Index_ETF_stock(name):
@@ -2490,29 +2537,29 @@ def Index_ETF_stock_list(name_list):
 
 
 
-from pathlib import Path
-def ticker_to_name_CSV(ticker):
-    base_dir = load_clean_lib.Option_metrics_path_from_profile()
-    df_path = Path(base_dir) / "Tickers" / "Input" / ticker / "returns and stock price.csv"
+# from pathlib import Path
+# def ticker_to_name_CSV(ticker):
+#     base_dir = load_clean_lib.Option_metrics_path_from_profile()
+#     df_path = Path(base_dir) / "Tickers" / "Input" / ticker / "returns and stock price.csv"
+#
+#     if ticker not in OEX_tickers: #Cross_AM_tickers + Liquid_ETF_Idx_tickers:
+#         name = ticker_to_name_Cross_AM.get(ticker, ticker)
+#     else:
+#         # ensure the file exists
+#         if not df_path.is_file():
+#             print(f"No CSV found for ticker '{ticker}' at {df_path}")
+#             return ''
+#
+#         df = pd.read_csv(df_path)
+#
+#         # grab the first value in the 'issuer' column and return it
+#         name = df['issuer'].iloc[0]
+#         name = name.title()
+#
+#     return name
 
-    if ticker not in OEX_tickers: #Cross_AM_tickers + Liquid_ETF_Idx_tickers:
-        name = ticker_to_name_Cross_AM.get(ticker, ticker)
-    else:
-        # ensure the file exists
-        if not df_path.is_file():
-            print(f"No CSV found for ticker '{ticker}' at {df_path}")
-            return ''
-
-        df = pd.read_csv(df_path)
-
-        # grab the first value in the 'issuer' column and return it
-        name = df['issuer'].iloc[0]
-        name = name.title()
-
-    return name
-
-def ticker_list_to_name_list(ticker_list):
-    return [ticker_to_name_CSV(ticker) for ticker in ticker_list]
+# def ticker_list_to_name_list(ticker_list):
+#     return [ticker_to_name_CSV(ticker) for ticker in ticker_list]
 
 
 
@@ -2535,27 +2582,47 @@ OEX_tickers_old = ["OEX", "OEF", "AA", "AAPL", "ABBV", "ABT", "ACN", "ADBE", "AE
 Cross_AM_tickers_old =  ["SPX", "VGK", "FXI", "EWJ", "EWZ", "INDA", "EZA", "EWC", "EEM", "EWU", "EWY", "EWA", "EWW", "VNQ", "TIP", "LQD", "HYG", "EMB", "IAU", "SLV", "UNG", "USO", "UVXY", "UUP", "FXE", "FXY", "BITO" ]
 VIX_tickers_old = ["SPX", "GOOGL", "AMZN", "DIA", "IWM", "QQQ", "AAPL", "EWZ", "USO", "GS", "EEM", "FXE", "SLV", "IBM"]
 DJX_tickers_old = ["DJX", "AA", "AAPL", "AIG", "AMGN", "AMZN", "AXP", "BA", "BAC", "C", "CAT", "CRM", "CSCO", "CVX", "DD", "DIS", "DOW", "GE", "GM", "GS", "GT", "HD", "HON", "HPQ", "IBM", "INTC", "IP", "JNJ", "JPM", "KO", "MCD", "MMM", "MO", "MRK", "MSFT", "NKE", "PFE", "PG", "RTX", "S", "T", "TRV", "UK", "UNH", "V", "VZ", "WBA", "WMT", "XOM"]
+Index_tickers = ["SPX", "OEX", "NDX", "DJX"]
+ETF_tickers   = ["SPY", "OEF", "QQQ", "DIA"]
 
-Index_tickers_old = ["SPX", "OEX", "NDX", "DJX"]
-ETF_tickers_old   = ["SPY", "OEF", "QQQ", "DIA"]
 Liquid_stock_tickers_old = ['GOOG', 'BKNG', 'TSLA', 'GOOGL', 'AMZN', 'META', 'NFLX', 'MA', 'PYPL', 'AAPL', 'AVGO', 'CHTR', 'NVDA', 'CRM', 'ABBV', 'HCA', 'V', 'GS', 'WB', 'GM', 'PM', 'MSFT', 'PARA', 'BA', 'ADBE', 'TMUS', 'OXY', 'MET', 'DE', 'DAL', 'BIIB', 'JPM', 'CAT', 'DIS', 'COST', 'COF', 'IBM', 'QCOM', 'GILD', 'ACN', 'UNH', 'C']
-Liquid_ETF_Idx_tickers_old = Index_tickers_old + ETF_tickers_old
-Liquid_tickers = Liquid_ETF_Idx_tickers_old + Liquid_stock_tickers_old
+Liquid_ETF_Idx_tickers_old = Index_tickers + ETF_tickers
+Liquid_tickers_old = Liquid_ETF_Idx_tickers_old + Liquid_stock_tickers_old
 ALL_tickers_old = get_unique_tickers([OEX_tickers_old, Cross_AM_tickers_old, VIX_tickers_old, DJX_tickers_old, Liquid_ETF_Idx_tickers_old])
 
 
+
 # Manual tickers
+# all
 All_tickers_original = ["NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "TMUS", "SCHW", "AMD", "DE", "INTU", "UK", "GT", "TRV", "SHW", "LIN", "GX", "JCI", "MDT", "COV", "ACN", "OEX", "SPX", "DJX", "BITO", "CEW", "DIA", "EEM", "EMB", "EWA", "EWC", "EWJ", "EWU_old", "EWW", "EWY", "EWZ", "EZA", "FXE", "FXI", "FXY", "HYG", "IAU", "INDA", "INDU", "IWM", "LQD", "OEF", "QQQ", "SHY", "SLV", "SPY", "TIP", "TLT", "USO", "UUP", "VGK", "VNQ", "UNG", "UVXY", "NDX", "EWU"]
 All_tickers =  ["GLD", "EFA", "RUT","NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "TMUS", "SCHW", "AMD", "DE", "INTU", "UK", "GT", "TRV", "SHW", "LIN", "GX", "JCI", "MDT", "COV", "ACN", "OEX", "SPX", "DJX", "BITO", "CEW", "DIA", "EEM", "EMB", "EWA", "EWC", "EWJ", "EWW", "EWY", "EWZ", "EZA", "FXE", "FXI", "FXY", "HYG", "IAU", "INDA", "INDU", "IWM", "LQD", "OEF", "QQQ", "SHY", "SLV", "SPY", "TIP", "TLT", "USO", "UUP", "VGK", "VNQ", "UNG", "UVXY", "NDX", "EWU_combined"]
 DJX_tickers = ["DJX", "UK", "DD_eidp", "JPM", "S_sears", "AA", "AXP", "BA", "C", "CAT", "CVX", "DIS", "EK", "GE", "GT", "HON", "HPQ", "IBM", "IP", "JNJ", "KO", "MCD", "MMM", "MO", "MRK", "PG", "RTX", "T", "WMT", "XOM", "T_old", "HD", "INTC", "MSFT", "AIG", "PFE", "VZ", "BAC", "MDLZ", "CSCO", "TRV", "UNH", "GS", "NKE", "V", "AAPL", "DD", "WBA", "DOW_inc", "AMGN", "CRM", "AMZN", "NVDA", "SHW"]
 DJX_tickers_constituents = ["UK", "DD_eidp", "JPM", "S_sears", "AA", "AXP", "BA", "C", "CAT", "CVX", "DIS", "EK", "GE", "GT", "HON", "HPQ", "IBM", "IP", "JNJ", "KO", "MCD", "MMM", "MO", "MRK", "PG", "RTX", "T", "WMT", "XOM", "T_old", "HD", "INTC", "MSFT", "AIG", "PFE", "VZ", "BAC", "MDLZ", "CSCO", "TRV", "UNH", "GS", "NKE", "V", "AAPL", "DD", "WBA", "DOW_inc", "AMGN", "CRM", "AMZN", "NVDA", "SHW"]
 OEX_tickers = ["OEX", "OEF", "NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JCI", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MDT", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "COV", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "ACN", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "LIN", "TMUS", "SCHW", "AMD", "DE", "INTU"]
 OEX_tickers_constituents = ["NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JCI", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MDT", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "COV", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "ACN", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "LIN", "TMUS", "SCHW", "AMD", "DE", "INTU"]
-Cross_AM_tickers = ["SPX"]
+
+# Cross-AM, VIX and Liquid ticker sets
+Cross_AM_tickers = ['GLD', 'EFA', "SPX", "VGK", "EEM", "FXI", "EWJ", "EWZ", "INDA", "EZA", "EWC", "EWU_combined", "EWY", "EWA", "EWW", "VNQ", "TIP", "LQD", "HYG", "EMB", "IAU", "SLV", "UNG", "USO", "UVXY", "UUP", "FXE", "FXY", "BITO", "CEW", "SHY", "TLT"]
+VIX_tickers = ['GLD', 'EFA', 'RUT', 'IBM', 'GS', 'AAPL', 'AMZN', 'GOOG', 'SPX', 'DJX', 'EEM', 'EWZ', 'TLT', 'USO', 'NDX']
+Liquid_ETF_Idx_tickers = Index_tickers + ETF_tickers
+Liquid_stock_tickers = ['GOOG', 'BKNG', 'TSLA', 'GOOGL', 'AMZN', 'META', 'OEX', 'NFLX',
+       'PYPL', 'MA', 'AAPL', 'AVGO', 'CHTR', 'NVDA', 'CRM', 'ABBV', 'V',
+       'GS', 'BLK', 'GM', 'PM', 'BA', 'TMUS', 'MSFT', 'PARA', 'ADBE',
+       'DE', 'BIIB', 'DIS', 'JPM', 'CAT', 'OXY', 'COST', 'MET', 'ACN',
+       'COF', 'IBM', 'GILD', 'QCOM', 'C', 'UNH', 'CVS']
+Liquid_tickers = Liquid_ETF_Idx_tickers + Liquid_stock_tickers
+
+
+
+
+
+
+
+
+
+
+
 Market_tickers = DJX_tickers + OEX_tickers
-
-
-
 
 
 Car_wu_tickers = ["SPX", "OEX", "DJX", "NDX", "QQQ", "MSFT", "INTC", "IBM", "AMER", "DELL",

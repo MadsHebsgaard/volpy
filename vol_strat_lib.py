@@ -148,7 +148,7 @@ def add_next_prices(sum_df, next_lookup):
     return sum_df
 
 
-def T_day_interpolation(T1, T2, r1, r2):
+def T_day_interpolation_old(T1, T2, r1, r2):
     if days_type() == "t_":
         T = 21
     elif days_type() == "c_":
@@ -156,8 +156,43 @@ def T_day_interpolation(T1, T2, r1, r2):
     else:
         print("days_type() is neither t_ nor c_")
         T = np.nan
-    return (r1 * np.abs(T2 - T) + r2 * np.abs(T1 - T)) / (np.abs(T2 - T) + np.abs(T1 - T))
 
+    return np.where(T1 == T2, (r1+r2)/2,
+                    (r1 * np.abs(T2 - T) + r2 * np.abs(T1 - T)) / (np.abs(T2 - T) + np.abs(T1 - T)))
+
+# (r1 * np.abs(T2 - T) + r2 * np.abs(T1 - T)) / (np.abs(T2 - T) + np.abs(T1 - T))
+
+def T_day_interpolation_CW(T1, T2, r1, r2, t = 0):
+    if days_type() == "t_":
+        T = 21
+    elif days_type() == "c_":
+        T = 30
+    else:
+        print("days_type() is neither t_ nor c_")
+        T = np.nan
+    theta = np.where(
+        T1 == T2,
+         0.5,
+         (T1 - t)*(T2 - T)/((T2 - T1)*T) * (T/(T-t))
+    )
+    SW_t_T = (r1 * theta + r2 * (1-theta))
+    return SW_t_T
+
+def T_day_interpolation_linear(T1, T2, r1, r2, t = 0):
+    if days_type() == "t_":
+        T = 21
+    elif days_type() == "c_":
+        T = 30
+    else:
+        print("days_type() is neither t_ nor c_")
+        T = np.nan
+
+    theta = np.where(
+        T1 == T2,
+        0.5,
+        (T2-(T-t)) / (T2 - T1)
+    )
+    return r1 * theta + r2 * (1-theta)
 
 def add_current_option_info(sum_df, od_hl, OTMs):
     '''
