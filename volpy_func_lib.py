@@ -1101,6 +1101,9 @@ def interpolate_swaps_and_returns(df):
     )
 
     df = df.loc[mask].copy() # Only keep if acceptable
+
+    df["RV-SW 30"] = df["RV"] - df["SW_0_30"]
+
     df["Average SW"] = df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
     df["EWMA SW 87.5%"] = df["SW_m1_29"].ewm(alpha=0.095, min_periods=5, adjust=False).mean()
     df["EWMA SW 80%"] = df["SW_m1_29"].ewm(alpha=0.075, min_periods=5, adjust=False).mean()
@@ -1109,19 +1112,14 @@ def interpolate_swaps_and_returns(df):
     df["r_30_SW_day"] = df["CF_30_SW_day"] / df["Average SW"]
     df["r_30_SW_day_noRF"] = df["CF_30_SW_day_noRF"] / df["Average SW"]
 
-    df["r_30_SW_day 87.5%"] = df["CF_30_SW_day"] / df["EWMA SW 87.5%"]
-    df["r_30_SW_day_noRF 87.5%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 87.5%"]
-
-    df["r_30_SW_day 80%"] = df["CF_30_SW_day"] / df["EWMA SW 80%"]
-    df["r_30_SW_day_noRF 80%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 80%"]
-
-    df["r_30_SW_day 66%"] = df["CF_30_SW_day"] / df["EWMA SW 66%"]
-    df["r_30_SW_day_noRF 66%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 66%"]
-
+    for alpha in np.arange(5, 30, 5):
+        df[f"EWMA SW .{alpha}"] = df["SW_m1_29"].ewm(alpha=alpha * 0.01, min_periods=5, adjust=False).mean()
+        df[f"r_30_SW_day .{alpha}"] = df["CF_30_SW_day"] / df[f"EWMA SW .{alpha}"]
+        df[f"r_30_SW_day_noRF .{alpha}"] = df["CF_30_SW_day_noRF"] / df[f"EWMA SW .{alpha}"]
 
     return df
 
-def add_calcs_to_files(filename_list):
+def add_calcs_to_files(filename_list = ["sum1", "sum2", "orpy"]):
     if days_type() == "c_":
         T = 30
     elif days_type() == "t_":
@@ -1135,25 +1133,19 @@ def add_calcs_to_files(filename_list):
         for ticker in file_dir.iterdir():
             df = pd.read_csv(file_dir / f"{ticker}")
 
-            df["r_30_SW_day old"] = df["CF_30_SW_day"] / df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
-            df["r_30_SW_day_noRF old"] = df["CF_30_SW_day_noRF"] / df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
+            # df["r_30_SW_day old"] = df["CF_30_SW_day"] / df["SW_0_30"].rolling(window=21, min_periods=5).mean()
+            df["RV-SW 30"] = df["RV"] - df["SW_0_30"]
 
-            df["Average SW"] = df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
-            df["EWMA SW 87.5%"] = df["SW_m1_29"].ewm(alpha=0.095, min_periods=5, adjust=False).mean()
-            df["EWMA SW 80%"] = df["SW_m1_29"].ewm(alpha=0.075, min_periods=5, adjust=False).mean()
-            df["EWMA SW 66%"] = df["SW_m1_29"].ewm(alpha=0.55, min_periods=5, adjust=False).mean()
 
-            df["r_30_SW_day"] = df["CF_30_SW_day"] / df["Average SW"]
-            df["r_30_SW_day_noRF"] = df["CF_30_SW_day_noRF"] / df["Average SW"]
+            # #add calculation here
+            # df["EWMA SW 0.11"] = df["SW_m1_29"].ewm(alpha=0.11, min_periods=5, adjust=False).mean()
+            # df["r_30_SW_day 0.11"] = df["CF_30_SW_day"] / df["EWMA SW 0.11"]
+            # df["r_30_SW_day_noRF 0.11"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 0.11"]
 
-            df["r_30_SW_day 87.5%"] = df["CF_30_SW_day"] / df["EWMA SW 87.5%"]
-            df["r_30_SW_day_noRF 87.5%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 87.5%"]
-
-            df["r_30_SW_day 80%"] = df["CF_30_SW_day"] / df["EWMA SW 80%"]
-            df["r_30_SW_day_noRF 80%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 80%"]
-
-            df["r_30_SW_day 66%"] = df["CF_30_SW_day"] / df["EWMA SW 66%"]
-            df["r_30_SW_day_noRF 66%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 66%"]
+            for alpha in np.arange(5,30,5):
+                df[f"EWMA SW .{alpha}"] = df["SW_m1_29"].ewm(alpha=alpha*0.01, min_periods=5, adjust=False).mean()
+                df[f"r_30_SW_day .{alpha}"] = df["CF_30_SW_day"] / df[f"EWMA SW .{alpha}"]
+                df[f"r_30_SW_day_noRF .{alpha}"] = df["CF_30_SW_day_noRF"] / df[f"EWMA SW .{alpha}"]
 
             df.to_csv(file_dir / f"{ticker}")
         print(f"finished with {filename}")

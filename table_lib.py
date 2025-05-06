@@ -282,6 +282,7 @@ sort_map = {
     "OEX":      True,
     "Liquid":   True,
     "CarrWu":   True,
+    "DJX":      True,
 }
 
 def sort_table_df(table_df, sum_df, name):
@@ -856,9 +857,73 @@ def latex_vix_table(df):
 
 
 
+import os
+def table_3_daily_EWMA(df, name, alpha):
+    alpha = int(round(alpha*100))
+    # ensure output dir
+    os.makedirs("figures/Analysis", exist_ok=True)
+
+    # 1) Prep the data
+    df = df.dropna(subset=["CF_30_SW_day", f"r_30_SW_day .{alpha}"]).copy()
+
+    # 2) in your compute_stats(), capture this NW std
+    def compute_stats(series):
+        n = len(series)
+        mean_ = series.mean()
+        std_ = series.std(ddof=1)
+        se_ = std_ / np.sqrt(n)  # standard error of the mean
+        auto_ = series.autocorr(lag=1)
+        skew_ = series.skew()
+        kurt_ = series.kurt()
+        t_ = mean_/se_
+        return pd.Series({
+            "Mean": mean_,
+            "Std": std_,
+            "Auto": auto_,
+            "Skew": skew_,
+            "Kurt": kurt_,
+            "t": t_,
+        })
+
+    # Panel A: (RV - SW_0_30) × 100
+    df_CF = (
+        df
+        .groupby("ticker", group_keys=False)
+        .apply(lambda g: compute_stats(g["CF_30_SW_day"] * 100))
+        .reset_index()
+    )
+    df_CF.columns = [
+        "ticker",
+        "Mean_CF", "Std_CF", "Auto_CF",
+        "Skew_CF", "Kurt_CF", "t_CF"
+    ]
+
+    # Panel B: ln(RV / SW_0_30)
+    df_r = (
+        df
+        .groupby("ticker", group_keys=False)
+        .apply(lambda g: compute_stats(g[f"r_30_SW_day .{alpha}"]))
+        .reset_index()
+    )
+    df_r.columns = ["ticker", "Mean_r", "Std_r", "Auto_r", "Skew_r", "Kurt_r", "t_r"]
+
+    # Compute Sharpe ratios for Panel B
+    df_r["SR_ann"] = -df_r["Mean_r"] / df_r["Std_r"] * np.sqrt(252)
+
+    # Merge & sort
+    out = pd.merge(df_CF, df_r, on="ticker", how="inner")
+    out = sort_table_df(out, df, name)
+    out["ticker"] = vp.ticker_list_to_ordered_map(out["ticker"])["ticker_out"]
+
+    # 3) Generate LaTeX and write file
+    latex = table_3_daily_latex(out, name)
+    with open(f"figures/Analysis/{name}_table_3_dailyEWMA_{alpha}.tex", "w") as f:
+        f.write(latex)
+
+    return out
 
 import os
-def table_3_daily(df, name):
+def table_3_daily(df, name, y_var):
     # ensure output dir
     os.makedirs("figures/Analysis", exist_ok=True)
 
@@ -916,7 +981,7 @@ def table_3_daily(df, name):
 
     # 3) Generate LaTeX and write file
     latex = table_3_daily_latex(out, name)
-    with open(f"figures/Analysis/{name}_table_3_daily.tex", "w") as f:
+    with open(f"figures/Analysis/{name}_{y_var}_table_3_daily.tex", "w") as f:
         f.write(latex)
 
     return out
@@ -1092,7 +1157,7 @@ def capm_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
 
 def save_capm_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
     tex, df = capm_table(returns_df, name, y_var, max_lags = max_lags)
-    with open(f"figures/Analysis/{name}_table_CAPM.tex", "w") as f:
+    with open(f"figures/Analysis/{name}_{y_var}_table_CAPM.tex", "w") as f:
         f.write(tex)
     return df
 
@@ -1167,7 +1232,7 @@ def ff_three_factor_table(returns_df, name,
 
 def save_ff3_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
     tex, df = ff_three_factor_table(returns_df, name, y_var, max_lags = max_lags)
-    with open(f"figures/Analysis/{name}_table_ff3.tex", "w") as f:
+    with open(f"figures/Analysis/{name}_{y_var}_table_ff3.tex", "w") as f:
         f.write(tex)
     return df
 
@@ -1244,7 +1309,7 @@ def ff_five_factor_table(returns_df, name,
 
 def save_ff5_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
     tex, df = ff_five_factor_table(returns_df, name, y_var, max_lags = max_lags)
-    with open(f"figures/Analysis/{name}_table_ff5.tex", "w") as f:
+    with open(f"figures/Analysis/{name}_{y_var}_table_ff5.tex", "w") as f:
         f.write(tex)
     return df
 

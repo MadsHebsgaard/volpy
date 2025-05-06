@@ -173,7 +173,7 @@ def T_day_interpolation_CW(T1, T2, r1, r2, t = 0):
     theta = np.where(
         T1 == T2,
          0.5,
-         (T1 - t)*(T2 - T)/((T2 - T1)*T) * (T/(T-t))
+         (T1 - t)*(T2 - T)/((T2-T1)*(T-t))
     )
     SW_t_T = (r1 * theta + r2 * (1-theta))
     return SW_t_T
