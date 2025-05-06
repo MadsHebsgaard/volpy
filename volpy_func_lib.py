@@ -488,7 +488,7 @@ def compute_rates_for_date(group, ZCY_curves):
         return group
     except Exception:
         import traceback, sys
-        print(f"\n🔥  ERROR in compute_rates_for_date for date {current_date!r} 🔥", file=sys.stderr)
+        print(f"\nERROR in compute_rates_for_date for date {current_date!r}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
         # re-raise so the ProcessPoolExecutor still knows it failed
         raise
@@ -1093,11 +1093,30 @@ def interpolate_swaps_and_returns(df):
             - df["squared_return"] * 252 * 1 / T  # realiseret variabllt ben
     ) * df["discount_factor_30d"]  # diskonteres
 
+    # Casflow version baseret på markedsværdi af en daglig (-short) swap = long
+    df["CF_30_SW_day_noRF"] = - (
+            df["SW_m1_29"]  # fast ben er det samme
+            - df["SW_0_29"] * (T - 1) / T  # ny "rest" variabelt ben
+            - df["squared_return"] * 252 * 1 / T  # realiseret variabllt ben
+    )
 
     df = df.loc[mask].copy() # Only keep if acceptable
     df["Average SW"] = df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
+    df["EWMA SW 87.5%"] = df["SW_m1_29"].ewm(alpha=0.095, min_periods=5, adjust=False).mean()
+    df["EWMA SW 80%"] = df["SW_m1_29"].ewm(alpha=0.075, min_periods=5, adjust=False).mean()
+    df["EWMA SW 66%"] = df["SW_m1_29"].ewm(alpha=0.55, min_periods=5, adjust=False).mean()
 
     df["r_30_SW_day"] = df["CF_30_SW_day"] / df["Average SW"]
+    df["r_30_SW_day_noRF"] = df["CF_30_SW_day_noRF"] / df["Average SW"]
+
+    df["r_30_SW_day 87.5%"] = df["CF_30_SW_day"] / df["EWMA SW 87.5%"]
+    df["r_30_SW_day_noRF 87.5%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 87.5%"]
+
+    df["r_30_SW_day 80%"] = df["CF_30_SW_day"] / df["EWMA SW 80%"]
+    df["r_30_SW_day_noRF 80%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 80%"]
+
+    df["r_30_SW_day 66%"] = df["CF_30_SW_day"] / df["EWMA SW 66%"]
+    df["r_30_SW_day_noRF 66%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 66%"]
 
 
     return df
@@ -1116,29 +1135,26 @@ def add_calcs_to_files(filename_list):
         for ticker in file_dir.iterdir():
             df = pd.read_csv(file_dir / f"{ticker}")
 
-            T1 = df["low days"]
-            T2 = df["high days"]
-            SW1 = df["low SW"]
-            SW2 = df["high SW"]
-            SW = df["SW_0_30"]
+            df["r_30_SW_day old"] = df["CF_30_SW_day"] / df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
+            df["r_30_SW_day_noRF old"] = df["CF_30_SW_day_noRF"] / df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
 
+            df["Average SW"] = df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
+            df["EWMA SW 87.5%"] = df["SW_m1_29"].ewm(alpha=0.095, min_periods=5, adjust=False).mean()
+            df["EWMA SW 80%"] = df["SW_m1_29"].ewm(alpha=0.075, min_periods=5, adjust=False).mean()
+            df["EWMA SW 66%"] = df["SW_m1_29"].ewm(alpha=0.55, min_periods=5, adjust=False).mean()
 
-            # Calculating high/low compatibility
-            df["high_low_compatibility"] = -(T1 - T) * (T2 - T) * (SW1 - SW2)**2 / T**2
-            # If positive they are good (interpolating from either side), yet best if closer to 0
-            # if negative they are bad, getting worse as the compatibility decreases.
-            # If 0 the swap is either low/high SW or the rates of both are identical, in which case the swap rate time curve could be convex or concave leading to some interpolation error still.
+            df["r_30_SW_day"] = df["CF_30_SW_day"] / df["Average SW"]
+            df["r_30_SW_day_noRF"] = df["CF_30_SW_day_noRF"] / df["Average SW"]
 
-            # Calculating SW score
-            min_SW = np.minimum(SW1, SW2)
-            max_SW = np.maximum(SW1, SW2)
+            df["r_30_SW_day 87.5%"] = df["CF_30_SW_day"] / df["EWMA SW 87.5%"]
+            df["r_30_SW_day_noRF 87.5%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 87.5%"]
 
-            df["SW_score"] = np.maximum(
-                SW / min_SW,
-                max_SW / SW
-            )
-            # if 1 then the interpolated swap is perfectly close to either swap, accuracy decreases when score increases.
-            # if negative the swap is negative
+            df["r_30_SW_day 80%"] = df["CF_30_SW_day"] / df["EWMA SW 80%"]
+            df["r_30_SW_day_noRF 80%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 80%"]
+
+            df["r_30_SW_day 66%"] = df["CF_30_SW_day"] / df["EWMA SW 66%"]
+            df["r_30_SW_day_noRF 66%"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 66%"]
+
             df.to_csv(file_dir / f"{ticker}")
         print(f"finished with {filename}")
 
@@ -1760,7 +1776,7 @@ def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strang
 
     sgy_list = create_sgy_list(sgy_common, sgy_names)
 
-    df = return_df(df, sgy_list = sgy_list, ticker_list = ticker_list, extra_columns = extra_columns) # todo: fix this _
+    df = return_df(df, sgy_list = sgy_list, ticker_list = ticker_list, extra_columns = extra_columns)
 
     if vol_index:   vol_symbols = load_clean_lib.vol_symbols
     else:           vol_symbols = []
