@@ -341,6 +341,7 @@ def fetch_wrds_data_per_ticker(db, tickers, begdate="1996-01-01", enddate="2024-
     # Opret direkte mappings uden check (vi ved, det er rent)
     ticker_to_permno = dict(zip(df_map["ticker"], df_map["permno"]))
     ticker_to_secid  = dict(zip(df_map["ticker"], df_map["secid"]))
+    
 
     # 2. Tjek om alle inputtickers findes i mapping
     missing_tickers = [t for t in tickers if t.upper() not in ticker_to_permno]
