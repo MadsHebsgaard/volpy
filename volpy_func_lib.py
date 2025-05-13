@@ -1103,12 +1103,9 @@ def interpolate_swaps_and_returns(df):
     df = df.loc[mask].copy() # Only keep if acceptable
 
     df["RV-SW 30"] = df["RV"] - df["SW_0_30"]
+    df["ln RV/SW 30"] = np.log(df["RV"]) - np.log(df["SW_0_30"])
 
     df["Average SW"] = df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
-    df["EWMA SW 87.5%"] = df["SW_m1_29"].ewm(alpha=0.095, min_periods=5, adjust=False).mean()
-    df["EWMA SW 80%"] = df["SW_m1_29"].ewm(alpha=0.075, min_periods=5, adjust=False).mean()
-    df["EWMA SW 66%"] = df["SW_m1_29"].ewm(alpha=0.55, min_periods=5, adjust=False).mean()
-
     df["r_30_SW_day"] = df["CF_30_SW_day"] / df["Average SW"]
     df["r_30_SW_day_noRF"] = df["CF_30_SW_day_noRF"] / df["Average SW"]
 
@@ -1117,38 +1114,44 @@ def interpolate_swaps_and_returns(df):
         df[f"r_30_SW_day .{alpha}"] = df["CF_30_SW_day"] / df[f"EWMA SW .{alpha}"]
         df[f"r_30_SW_day_noRF .{alpha}"] = df["CF_30_SW_day_noRF"] / df[f"EWMA SW .{alpha}"]
 
+
     return df
 
-def add_calcs_to_files(filename_list = ["sum1", "sum2", "orpy"]):
-    if days_type() == "c_":
-        T = 30
-    elif days_type() == "t_":
-        T = 21
+def add_calcs_to_files(filename_list = None, folder_dir = "SumAndOrpy"):
 
     base_dir = load_clean_lib.Option_metrics_path_from_profile()
 
+    file_dir = base_dir / "Tickers" / folder_dir / "t_"
+
+    if folder_dir == "SumAndOrpy" and filename_list is None:
+        filename_list = ["sum1", "sum2", "orpy"]
+    elif folder_dir == "Output" and filename_list is None:
+        filename_list = ["sum1_df"]
+
     for filename in filename_list:
-        file_dir = base_dir / "Tickers" / "SumAndOrpy" / "t_" / filename
+        if folder_dir == "SumAndOrpy":
+            file_dir = file_dir / filename
 
         for ticker in file_dir.iterdir():
-            df = pd.read_csv(file_dir / f"{ticker}")
+
+            if folder_dir == "SumAndOrpy":
+                file_dir = file_dir / f"{ticker}"
+            elif folder_dir == "Output":
+                file_path = file_dir / ticker / f"{filename}.csv"
+
+            df = pd.read_csv(file_path)
 
             # df["r_30_SW_day old"] = df["CF_30_SW_day"] / df["SW_0_30"].rolling(window=21, min_periods=5).mean()
             df["RV-SW 30"] = df["RV"] - df["SW_0_30"]
-
-
-            # #add calculation here
-            # df["EWMA SW 0.11"] = df["SW_m1_29"].ewm(alpha=0.11, min_periods=5, adjust=False).mean()
-            # df["r_30_SW_day 0.11"] = df["CF_30_SW_day"] / df["EWMA SW 0.11"]
-            # df["r_30_SW_day_noRF 0.11"] = df["CF_30_SW_day_noRF"] / df["EWMA SW 0.11"]
+            df["ln RV/SW 30"] = np.log(df["RV"]) - np.log(df["SW_0_30"])
 
             for alpha in np.arange(5,30,5):
-                df[f"EWMA SW .{alpha}"] = df["SW_m1_29"].ewm(alpha=alpha*0.01, min_periods=5, adjust=False).mean()
-                df[f"r_30_SW_day .{alpha}"] = df["CF_30_SW_day"] / df[f"EWMA SW .{alpha}"]
-                df[f"r_30_SW_day_noRF .{alpha}"] = df["CF_30_SW_day_noRF"] / df[f"EWMA SW .{alpha}"]
+                df[f"EWMA SW .{round(alpha,0)}"] = df["SW_m1_29"].ewm(alpha=alpha*0.01, min_periods=5, adjust=False).mean()
+                df[f"r_30_SW_day .{round(alpha,0)}"] = df["CF_30_SW_day"] / df[f"EWMA SW .{round(alpha,0)}"]
+                # df[f"r_30_SW_day_noRF .{alpha}"] = df["CF_30_SW_day_noRF"] / df[f"EWMA SW .{alpha}"]
 
-            df.to_csv(file_dir / f"{ticker}")
-        print(f"finished with {filename}")
+            df.to_csv(file_path)
+        print(f"finished with {filename} from {folder_dir}")
 
 
 def add_realized_vol_to_summary(summary_dly_df, real_vol):
@@ -1648,6 +1651,7 @@ def create_sgy_list(sgy_common = "CF_D_30_", sgy_list = ["straddle", "strangle_1
 
 
 def return_df(df_big, sgy_list = create_sgy_list(), ticker_list = ["SPX"], extra_columns = []):
+
     df = df_big[df_big["ticker"].isin(ticker_list)]
 
     # df = df[df["CF_D_30_put_ATM"].isna() == False]
@@ -1735,31 +1739,50 @@ def scale_columns_to_r_stock_average(df, sgy_list, ref_column="r_stock"):
     return df
 
 
-def plot_returns(df, sgy_common, sgy_names, factors, figsize=(30, 10)):
+def plot_returns(df, sgy_common, sgy_names, factors = [], figsize=(30, 10), lw = 0.5, fig_name = None):
     plt.figure(figsize=figsize)
 
     for sgy_name in sgy_names:
-        sgy_str = sgy_common + sgy_name
-        plt.plot(df["date"], np.cumsum(df[f"{sgy_str}"]), label=rf"{sgy_name}", alpha=0.8)
 
-    plt.plot(df["date"], np.cumsum(df["r_stock"]),
-        label="Stock", alpha=0.4)
+        formatted = rf"{sgy_name}".replace("_", " ").title().replace("Otm", "OTM").replace("Atm", "ATM")
+
+        sgy_str = sgy_common + sgy_name
+        plt.plot(df["date"], np.cumsum(df[f"{sgy_str}"]), label=formatted, alpha=0.8, lw = lw)
 
     for factor in factors:
-        plt.plot(df["date"], np.cumsum(df[f"{factor}"]), label=rf"{factor}", alpha=0.8)
+        plt.plot(df["date"], np.cumsum(df[f"{factor}"]), label=rf"{factor}", alpha=0.8, lw = lw)
 
-    plt.plot(df["date"], np.cumsum(df["CF_30_SW_day"]), label = "Swap day")
+    plt.plot(df["date"], np.cumsum(df["r_stock"]),
+        label="Stock", alpha=1, lw = 2*lw)
 
-    plt.plot(df["date"], np.cumsum(df["r_30_SW_day"]), label = "Swap day return")
+    plt.plot(df["date"], np.cumsum(df["CF_30_SW_day"]), label = "Swap day", lw = 3*lw)
+
+    plt.plot(df["date"], np.cumsum(df["r_30_SW_day"]), label = "Swap day (SW scaled)", lw = 3*lw)
+
 
     plt.grid()
-    plt.legend()
+    handles, labels = plt.gca().get_legend_handles_labels()
+
+    # bring the last two entries to the front
+    ordered_handles = handles[-2:] + [handles[-3]] + handles[:-3]
+    ordered_labels =  labels[-2:] +  [labels[-3]] +  labels[:-3]
+    # ordered_handles = handles[-3:] + handles[:-3]
+    # ordered_labels = labels[-3:] + labels[:-3]
+
+    plt.legend(ordered_handles, ordered_labels)
+
+    plt.tight_layout()
+
+    if fig_name is not None:
+        plt.savefig(fig_name)
+
     plt.show()
+
 
 # missing ticker
 def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strangle_15%", "call_ATM", "put_ATM"],
                    factors=['Mkt', 'SPX', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF'], vol_index = False, sign=True,
-                   scale=True, plot = False, ticker_list = None, extra_columns = [], figsize = (30, 10)):
+                   scale=True, plot = False, ticker_list = None, extra_columns = [], figsize = (30, 10), extra_scale_columns = [], lw = 0.5, fig_name = None):
     if sgy_names is None:
         sgy_names = [col.replace(sgy_common, "") for col in df.columns if sgy_common in col]
 
@@ -1768,20 +1791,22 @@ def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strang
 
     sgy_list = create_sgy_list(sgy_common, sgy_names)
 
-    df = return_df(df, sgy_list = sgy_list, ticker_list = ticker_list, extra_columns = extra_columns)
+
+
+    df = return_df(df, sgy_list = sgy_list, ticker_list = ticker_list, extra_columns = extra_columns + extra_scale_columns)
 
     if vol_index:   vol_symbols = load_clean_lib.vol_symbols
     else:           vol_symbols = []
     df = add_factor_df_columns(df, factors + vol_symbols)
 
     if sign:
-        df = scale_columns_to_r_stock_average(df, sgy_list + factors, ref_column="r_stock")
+        df = scale_columns_to_r_stock_average(df, sgy_list + factors + extra_scale_columns, ref_column="r_stock")
     if scale:
-        df = scale_columns_to_r_stock_std_dev(df, sgy_list + factors, ref_column="r_stock")
+        df = scale_columns_to_r_stock_std_dev(df, sgy_list + factors + extra_scale_columns, ref_column="r_stock")
 
     if plot:
         factors = [col for col in factors if col != "RF"]
-        plot_returns(df, sgy_common, sgy_names, factors, figsize)
+        plot_returns(df, sgy_common, sgy_names, factors, figsize, lw, fig_name)
 
     return df
 
@@ -1909,10 +1934,31 @@ def compute_extensive_performance_measures_cashflows(df, cvar_alpha=0.05, period
         # Calmar Ratio: Annualized mean return divided by the absolute max drawdown
         calmar_ratio = annualized_mean / abs(max_drawdown) if max_drawdown != 0 else np.nan
 
-        # Tail Ratio: Invariant to scaling, so calculated directly on daily returns
-        q90 = data.quantile(0.9)
-        q10 = data.quantile(0.1)
-        tail_ratio = q90 / abs(q10) if q10 != 0 else np.nan
+
+        # Tail Ratio:
+        q95 = data.quantile(0.95)
+        q05 = data.quantile(0.05)
+        tail_ratio_50 = q95 / abs(q05) if q05 != 0 else np.nan
+
+        # Tail Ratio:
+        q975 = data.quantile(0.975)
+        q025 = data.quantile(0.025)
+        tail_ratio_25 = q975 / abs(q025) if q025 != 0 else np.nan
+
+        # Tail Ratio:
+        q99 = data.quantile(0.99)
+        q01 = data.quantile(0.01)
+        tail_ratio_10 = q99 / abs(q01) if q01 != 0 else np.nan
+
+        # Tail Ratio:
+        q995 = data.quantile(0.995)
+        q005 = data.quantile(0.005)
+        tail_ratio_05 = q995 / abs(q005) if q005 != 0 else np.nan
+
+        q999 = data.quantile(0.999)
+        q001 = data.quantile(0.001)
+        tail_ratio_01 = q999 / abs(q001) if q001 != 0 else np.nan
+
 
         # Recovery Duration: Measure from the maximum drawdown point (trough) to the recovery point
         # Identify the index of maximum drawdown (trough)
@@ -1952,28 +1998,51 @@ def compute_extensive_performance_measures_cashflows(df, cvar_alpha=0.05, period
         autocorr = data.autocorr(lag=1)
 
         results[col] = {
-            "Ann. Mean": annualized_mean,
-            "Ann. Std Dev": annualized_std,
-            "Ann. Sharpe Ratio": annualized_sharpe,
-            "Ann. Sortino Ratio": annualized_sortino,
+            "Mean": annualized_mean,
+            "SD": annualized_std,
             "Skew": skew(data),
-            "Kurtosis": kurtosis(data),
-            "Max Drawdown (CumCF)": max_drawdown,
-            f"Ann. VaR {int(cvar_alpha * 100)}%": annualized_var,
-            f"Ann. CVaR {int(cvar_alpha * 100)}%": annualized_cvar,
-            "Total Cashflow": total_cashflow,
-            "Win Rate": win_rate,
-            "Average Gain": avg_gain,
-            "Average Loss": avg_loss,
-            "Gain/Loss Ratio": gain_loss_ratio,
-            "Profit Factor": profit_factor,
-            "Calmar Ratio": calmar_ratio,
-            "Tail Ratio": tail_ratio,
-            "Recovery Duration (years)": recovery_duration_years,
-            "Lag-1 Autocorrelation": autocorr
+            "Kurt": kurtosis(data),
+            "Auto(1)": autocorr,
+            rf"VaR {int(cvar_alpha * 100)}\%": annualized_var,
+            rf"CVaR {int(cvar_alpha * 100)}\%": annualized_cvar,
+            "Max DD": max_drawdown,
+            "Sharpe": annualized_sharpe,
+            "Sortino": annualized_sortino,
+            "Calmar": calmar_ratio,
+            "Win": win_rate,
+            "P/L": gain_loss_ratio,
+            r"Tail 5\%": tail_ratio_50,
+            r"Tail 1\%": tail_ratio_10,
+            r"Tail 0.1\%": tail_ratio_01,
         }
+    # "Mean": annualized_mean,
+    # "Std Dev": annualized_std,
+    # "Skew": skew(data),
+    # "Kurtosis": kurtosis(data),
+    # "Sharpe Ratio": annualized_sharpe,
+    # "Sortino Ratio": annualized_sortino,
+    # "Calmar Ratio": calmar_ratio,
+    # "Win Ratio": win_rate,
+    # "P/L Ratio": gain_loss_ratio,
+    # "Max DD": max_drawdown,
+    # rf"VaR {int(cvar_alpha * 100)}\%": annualized_var,
+    # rf"CVaR {int(cvar_alpha * 100)}\%": annualized_cvar,
+    # r"Tail Ratio 5 \%": tail_ratio_50,
+    # r"Tail Ratio 1\%": tail_ratio_10,
+    # "Auto(1)": autocorr
 
-    return pd.DataFrame(results).T
+    # "Tail Ratio (2.5%)": tail_ratio_25,
+    # "Total Cashflow": total_cashflow,
+    # "Average Gain": avg_gain,
+    # "Average Loss": avg_loss,
+    # "Profit Factor": profit_factor,
+    # "Tail Ratio (0.5%)": tail_ratio_05,
+    # "Recovery Duration (years)": recovery_duration_years,
+
+    results_df = pd.DataFrame(results) * 100
+    return pd.DataFrame(results_df)
+
+
 
 
 def compute_extensive_performance_measures_cashflows_FF_factors(df, cvar_alpha=0.05, periods_per_year=252):
@@ -2275,8 +2344,8 @@ def plot_ticker_SW_vs_vix(df, ticker, figsize = (10, 6), show_fig = True, save_f
     df_tmp = df_tmp[df_tmp[vol_symbol].isna() == False]
 
     plt.figure(figsize=figsize)
-    plt.plot(df_tmp["date"], df_tmp["SW_0_30"], label=f"SW ({ticker})", alpha=1, lw=0.5)
-    plt.plot(df_tmp["date"], df_tmp[vol_symbol] ** 2, label=rf"{vol_symbol}$^2$", alpha=1, lw=0.5)
+    plt.plot(df_tmp["date"], df_tmp["SW_0_30"]**0.5, label=rf"$\sqrt{{\text{{SW}}}}$ ({ticker})", alpha=1, lw=0.75)
+    plt.plot(df_tmp["date"], df_tmp[vol_symbol], label=rf"{vol_symbol}", alpha=1, lw=0.75)
     plt.legend()
     plt.grid(alpha=0.4)
     plt.tight_layout()
@@ -2452,6 +2521,7 @@ name_overrides = {
     "MDT": "Medtronic plc",
     "COV": "Covidien plc",
     "ACN": "Accenture plc",
+    "IBM": "International B. Machines Corp",
 
     # Indexes
     "SPX": "S&P 500 Index",
@@ -2498,9 +2568,9 @@ name_overrides = {
     "FXY": "Japanese Yen Trust",
     "BITO": "Bitcoin ETF",
     "CEW": "Emerging Currency ETF",
-    "SHY": "iShares 1-3 Year Treasury Bond ETF",
-    "TLT": "iShares 20+ Year Treasury Bond ETF",
-    "EFA": "EAFE: Dev. mkt. ex. U.S. and Canada",
+    "SHY": "1-3 Year Treasury Bond ETF",
+    "TLT": "20+ Year Treasury Bond ETF",
+    "EFA": "Dev. mkt. ex. US and Canada",
     "GLD":  "Gold ETF",
 }
 
@@ -2597,11 +2667,11 @@ OEX_tickers_constituents = ["NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EM
 Cross_AM_tickers = ['GLD', 'EFA', "SPX", "VGK", "EEM", "FXI", "EWJ", "EWZ", "INDA", "EZA", "EWC", "EWU_combined", "EWY", "EWA", "EWW", "VNQ", "TIP", "LQD", "HYG", "EMB", "IAU", "SLV", "UNG", "USO", "UVXY", "UUP", "FXE", "FXY", "BITO", "CEW", "SHY", "TLT"]
 VIX_tickers = ['GLD', 'EFA', 'RUT', 'IBM', 'GS', 'AAPL', 'AMZN', 'GOOG', 'SPX', 'DJX', 'EEM', 'EWZ', 'TLT', 'USO', 'NDX']
 Liquid_ETF_Idx_tickers = Index_tickers + ETF_tickers
-Liquid_stock_tickers = ['GOOG', 'BKNG', 'TSLA', 'GOOGL', 'AMZN', 'META', 'OEX', 'NFLX',
+Liquid_stock_tickers = ['GOOG', 'BKNG', 'TSLA', 'GOOGL', 'AMZN', 'META', 'NFLX',
        'PYPL', 'MA', 'AAPL', 'AVGO', 'CHTR', 'NVDA', 'CRM', 'ABBV', 'V',
        'GS', 'BLK', 'GM', 'PM', 'BA', 'TMUS', 'MSFT', 'PARA', 'ADBE',
        'DE', 'BIIB', 'DIS', 'JPM', 'CAT', 'OXY', 'COST', 'MET', 'ACN',
-       'COF', 'IBM', 'GILD', 'QCOM', 'C', 'UNH', 'CVS']
+       'COF', 'IBM', 'GILD', 'C', 'QCOM', 'UNH', 'CVS', "WFC"]
 Liquid_tickers = Liquid_ETF_Idx_tickers + Liquid_stock_tickers
 
 
@@ -2649,4 +2719,16 @@ def get_company_name(ticker):
     return None
 
 
+
+def clean_option_names(df):
+    df.columns = (
+        df.columns
+        .str.replace('_', ' ')
+        .str.title()
+        .str.replace('Atm', 'ATM')
+        .str.replace('Otm', 'OTM')
+        .str.replace('Cf Sw', 'CF SW')
+        .str.replace('Cf', 'CF')
+    )
+    return df
 

@@ -430,7 +430,6 @@ def CarrWu2009_table_2_latex_v2(table_df, name):
     # ——— add size commands & float barrier ———
     lines.insert(0, r'\scriptsize')
     lines.append(r'\normalsize')
-    lines.append(r'\FloatBarrier')
 
     return "\n".join(lines)
 
@@ -662,9 +661,9 @@ def CarrWu2009_table_3_latex_v2(table_df, name):
         multirow=True,
         longtable=True,
         caption=(
-            rf"Summary statistics for (RV – SW) $\times$ 100 and ln(RV / SW) for the {name} dataset. "
-            "Each panel shows Mean, Std. dev., Auto(1), Skew, Kurt, and t-statistic; "
-            "Panel B also reports an annualized Sharpe ratio (SR)."
+            rf"Summary statistics for (RV – SW) $\times$ 100 and ln(RV / SW) for the {name} dataset using monthly values. "
+            "Each panel shows Mean, Std. dev., Auto(1), Skew, Kurt, and Newey West (1987) t-statistic; "
+            "Panel B also reports an annualized Sharpe ratio (SR) of going short the variance swap."
         ),
         label=f"tab:analysis:Summary statistics diff and logratio ({name})",
         column_format='rlcccccc||ccccccc',
@@ -682,7 +681,6 @@ def CarrWu2009_table_3_latex_v2(table_df, name):
     # 4) Add size commands & float barrier
     lines.insert(0, r'\scriptsize')
     lines.append(r'\normalsize')
-    lines.append(r'\FloatBarrier')
 
     return "\n".join(lines)
 
@@ -889,7 +887,7 @@ def table_3_daily_EWMA(df, name, alpha):
     df_CF = (
         df
         .groupby("ticker", group_keys=False)
-        .apply(lambda g: compute_stats(g["CF_30_SW_day"] * 100))
+        .apply(lambda g: compute_stats(g["CF_30_SW_day"] * 100 * 252))
         .reset_index()
     )
     df_CF.columns = [
@@ -916,11 +914,81 @@ def table_3_daily_EWMA(df, name, alpha):
     out["ticker"] = vp.ticker_list_to_ordered_map(out["ticker"])["ticker_out"]
 
     # 3) Generate LaTeX and write file
-    latex = table_3_daily_latex(out, name)
+    latex = table_3_daily_EWMA_latex(out, name, alpha)
     with open(f"figures/Analysis/{name}_table_3_dailyEWMA_{alpha}.tex", "w") as f:
         f.write(latex)
 
     return out
+
+
+def table_3_daily_EWMA_latex(table_df, name, alpha):
+    """
+    Generates a longtable with:
+      - Line number
+      - Panel A: (RV - SW) × 100 (Mean, Std. dev., Auto, Skew, Kurt, t)
+      - Panel B: ln(RV / SW) (Mean, Std. dev., Auto, Skew, Kurt, t, SR)
+    """
+    # 1) Reorder & set up MultiIndex
+    table_df = table_df[
+        [
+            "ticker",
+            "Mean_CF", "Std_CF", "Auto_CF", "Skew_CF", "Kurt_CF", "t_CF",
+            "Mean_r",   "Std_r",   "Auto_r",   "Skew_r",   "Kurt_r",   "t_r",  "SR_ann"
+        ]
+    ]
+    # insert line numbers
+    table_df.insert(0, ("", "No."), range(1, len(table_df) + 1))
+    # rename columns to a two‐level header
+    table_df.columns = pd.MultiIndex.from_tuples([
+        ("",                           "No."),
+        ("",                       "Ticker"),
+        ("Panel A: (RV – SW) × 100",   "Mean"),
+        ("Panel A: (RV – SW) × 100",   "Std. dev."),
+        ("Panel A: (RV – SW) × 100",   "Auto"),
+        ("Panel A: (RV – SW) × 100",   "Skew"),
+        ("Panel A: (RV – SW) × 100",   "Kurt"),
+        ("Panel A: (RV – SW) × 100",     "t"),
+        ("Panel B: ln(RV / SW)",        "Mean"),
+        ("Panel B: ln(RV / SW)",        "Std. dev."),
+        ("Panel B: ln(RV / SW)",        "Auto"),
+        ("Panel B: ln(RV / SW)",        "Skew"),
+        ("Panel B: ln(RV / SW)",        "Kurt"),
+        ("Panel B: ln(RV / SW)",        "t"),
+        ("Panel B: ln(RV / SW)",        "SR")
+    ])
+
+    # 2) Export as longtable
+    latex = table_df.to_latex(
+        index=False,
+        float_format="%.2f",
+        multicolumn=True,
+        multirow=True,
+        longtable=True,
+        caption=(
+            rf"Summary statistics for daily cashflow of rolling a variance swap (CF $\times$ 100) and the return on the strategy (CF / $\overline{{SW}}$) for the {name} dataset. "
+            f"We let $\overline{{SW}}$ be the exponentially weighted moving average swaprate with decay of {round(alpha)}\%. "
+            "Each panel shows the annualized Mean, Std. dev., Auto(1), Skew, Kurt, and t-statistic; "
+            "Panel B also reports an annualized Sharpe ratio (SR) of going short the rolling variance swap strategy."
+        ),
+        label=f"tab:analysis:Summary statistics CF and r ({name}, EWMA)",
+        column_format='rlcccccc||ccccccc',
+        multicolumn_format="c"
+    )
+
+    # 3) Inject cmidrule under the top header
+    lines = latex.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip().startswith(r'\toprule'):
+            # after \toprule and the next header line
+            lines.insert(i + 2, r'\cmidrule(lr){3-8}\cmidrule(lr){9-15}')
+            break
+
+    # 4) Add size commands & float barrier
+    lines.insert(0, r'\scriptsize')
+    lines.append(r'\normalsize')
+
+    return "\n".join(lines)
+
 
 import os
 def table_3_daily(df, name, y_var):
@@ -1052,7 +1120,6 @@ def table_3_daily_latex(table_df, name):
     # 4) Add size commands & float barrier
     lines.insert(0, r'\scriptsize')
     lines.append(r'\normalsize')
-    lines.append(r'\FloatBarrier')
 
     return "\n".join(lines)
 
@@ -1162,9 +1229,15 @@ def save_capm_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
     return df
 
 
+# def ff3_factor_table_dly_mly(returns_df, name):
+    # "Comparison of Fama-French factor models for monthly variance risk premiums (Panel A) "
+    # "and daily returns (Panel B). Panel A estimates $\\ln RV_{t,\\tau}/SW_{t,\\tau}$ using HAC "
+    # "standard errors with 21 lags. Panel B estimates $r_{t,\\tau}$ using OLS standard errors. "
+    # "T-statistics shown in parentheses."
 
 
-def ff_three_factor_table(returns_df, name,
+
+def ff3_factor_table(returns_df, name,
                           y_var="r_30_SW_day", max_lags=0):
     import numpy as np
     import pandas as pd
@@ -1228,15 +1301,116 @@ def ff_three_factor_table(returns_df, name,
     out = ["\\scriptsize"] + latex + ["\\normalsize", "\\FloatBarrier"]
     return "\n".join(out), df
 
-
-
 def save_ff3_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
-    tex, df = ff_three_factor_table(returns_df, name, y_var, max_lags = max_lags)
+    tex, df = ff3_factor_table(returns_df, name, y_var, max_lags = max_lags)
     with open(f"figures/Analysis/{name}_{y_var}_table_ff3.tex", "w") as f:
         f.write(tex)
     return df
 
-def ff_five_factor_table(returns_df, name,
+
+def save_ff3_table_dly_mly(returns_df, name):
+    tex, df = ff3_factor_table_dly_mly(returns_df, name)
+    with open(f"figures/Analysis/{name}_dly_mly_table_ff3.tex", "w") as f:
+        f.write(tex)
+    return df
+
+
+def ff3_factor_table_dly_mly(returns_df, name):
+    import numpy as np
+    import pandas as pd
+    import statsmodels.api as sm
+
+    TRADING_DAYS = 252
+    records = []
+    panel_A = r"Panel A: $r_{\text{SW}}^{\text{month}}$"
+    panel_B = r"Panel B: $r_{\text{SW}}^{\text{day}}$"
+
+    for ticker, g in returns_df.groupby("ticker"):
+        rec = {"Ticker": ticker}
+        X_vars = ["SPX", "SMB", "HML"]
+
+        # Panel A: y_var="RV-SW 30", HAC with max_lags=21
+        y_var_A = "RV-SW 30"
+        gA = g.dropna(subset=[y_var_A] + X_vars)
+        if len(gA) > 0:
+            X = sm.add_constant(gA[X_vars])
+            fitA = sm.OLS(gA[y_var_A], X).fit(cov_type="HAC", cov_kwds={"maxlags": 21})
+            pA, tA = fitA.params, fitA.tvalues
+            r2A = fitA.rsquared
+            αA = pA["const"] * TRADING_DAYS
+        else:
+            pA = {k: np.nan for k in ["const"] + X_vars}
+            tA = {k: np.nan for k in ["const"] + X_vars}
+            r2A = αA = np.nan
+
+        rec.update({
+            (panel_A, r"\(\alpha\)"):    f"{αA:.3f}\n({tA['const']:.3f})",
+            (panel_A, r"\(\beta^{SPX}\)"): f"{pA['SPX']:.3f}\n({tA['SPX']:.3f})",
+            (panel_A, r"\(\beta^{SMB}\)"): f"{pA['SMB']:.3f}\n({tA['SMB']:.3f})",
+            (panel_A, r"\(\beta^{HML}\)"): f"{pA['HML']:.3f}\n({tA['HML']:.3f})",
+            (panel_A, r"\(R^2\)"):        f"{r2A:.3f}",
+        })
+
+        # Panel B: y_var="r_30_SW_day .20", plain OLS (max_lags=None)
+        y_var_B = "r_30_SW_day .20"
+        gB = g.dropna(subset=[y_var_B] + X_vars)
+        if len(gB) > 0:
+            X = sm.add_constant(gB[X_vars])
+            fitB = sm.OLS(gB[y_var_B], X).fit()
+            pB, tB = fitB.params, fitB.tvalues
+            r2B = fitB.rsquared
+            αB = pB["const"] * TRADING_DAYS
+        else:
+            pB = {k: np.nan for k in ["const"] + X_vars}
+            tB = {k: np.nan for k in ["const"] + X_vars}
+            r2B = αB = np.nan
+
+        rec.update({
+            (panel_B, r"\(\alpha\)"):    f"{αB:.3f}\n({tB['const']:.3f})",
+            (panel_B, r"\(\beta^{SPX}\)"): f"{pB['SPX']:.3f}\n({tB['SPX']:.3f})",
+            (panel_B, r"\(\beta^{SMB}\)"): f"{pB['SMB']:.3f}\n({tB['SMB']:.3f})",
+            (panel_B, r"\(\beta^{HML}\)"): f"{pB['HML']:.3f}\n({tB['HML']:.3f})",
+            (panel_B, r"\(R^2\)"):        f"{r2B:.3f}",
+        })
+
+        records.append(rec)
+
+    df = pd.DataFrame(records)
+    df.rename(columns={'Ticker': 'ticker'}, inplace=True)
+    df = sort_table_df(df, returns_df, name)
+    df["ticker"] = vp.ticker_list_to_ordered_map(df["ticker"])["ticker"]
+    df.rename(columns={'ticker': 'Ticker'}, inplace=True)
+    df = df.set_index("Ticker")
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+
+    latex = df.to_latex(
+        index=True, escape=False, multicolumn=True, multirow=True, longtable=True,
+        caption=(
+            "Explaining variance risk premiums with Fama–French risk factors. "
+            "Panel A reports estimates of $r_{\\text{SW}}^{\\text{month}} = RV_{-30,0}-SW_{-30,0} = \\alpha + \\beta Mkt + s SMB + h HML + e$ using HAC standard errors (max lags=21). "
+            "Panel B reports estimates of $r_{\\text{SW}}^{\\text{day}} = RV_{-1,29} - SW_{-0,29} - \\text{RV}_{-1,0} = \\alpha + \\beta Mkt + s SMB + h HML + e$ using OLS. "
+            "Each panel presents GMM estimates, t-statistics (parentheses), and unadjusted $R^2$. "
+            "$r_{\\text{SW}}^{\\text{month}}$ and $r_{\\text{SW}}^{\\text{day}}$ are the returns on the strategies of holding the swap for the full month and a single day, respectively."
+        ),
+        label=f"tab:analysis:ff3_dly_mly_{name}",
+        column_format="l" + "ccccc" * 2,
+        multicolumn_format="c",
+        float_format="%.3f"
+    ).splitlines()
+
+    # insert cmidrules
+    for i, line in enumerate(latex):
+        if line.strip().startswith(r"\toprule"):
+            latex.insert(i + 2, r"\cmidrule(lr){2-6}\cmidrule(lr){7-11}")
+            break
+
+    out = ["\\begingroup", "\\setlength{\\tabcolsep}{3pt}", "\\tiny"] + latex + ["\\endgroup"]
+    return "\n".join(out), df
+
+
+
+
+def ff5_factor_table(returns_df, name,
                          y_var="r_30_SW_day", max_lags=0):
     import numpy as np
     import pandas as pd
@@ -1251,8 +1425,12 @@ def ff_five_factor_table(returns_df, name,
         g0 = g.dropna(subset=[y_var, "Mkt", "SMB", "HML", "BAB", "UMD"])
         if len(g0):
             X = sm.add_constant(g0[["Mkt","SMB","HML","BAB","UMD"]])
-            fit = sm.OLS(g0[y_var], X)\
-                    .fit(cov_type="HAC", cov_kwds={"maxlags": max_lags})
+
+            if max_lags is not None:
+                fit = sm.OLS(g0[y_var], X).fit(cov_type="HAC", cov_kwds={"maxlags": max_lags})
+            else:
+                fit = sm.OLS(g0[y_var], X).fit()
+
             ps = fit.params * np.array([TRADING_DAYS] + [1]*5)
             ts = fit.tvalues
             r2 = fit.rsquared
@@ -1306,12 +1484,18 @@ def ff_five_factor_table(returns_df, name,
 
 
 
-
 def save_ff5_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
-    tex, df = ff_five_factor_table(returns_df, name, y_var, max_lags = max_lags)
+    tex, df = ff5_factor_table(returns_df, name, y_var, max_lags = max_lags)
     with open(f"figures/Analysis/{name}_{y_var}_table_ff5.tex", "w") as f:
         f.write(tex)
     return df
+
+
+# def save_ff5_table_dly_mly(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
+#     tex, df = ff5_factor_table_dly_mly(returns_df, name)
+#     with open(f"figures/Analysis/{name}_{y_var}_table_ff5.tex", "w") as f:
+#         f.write(tex)
+#     return df
 
 
 

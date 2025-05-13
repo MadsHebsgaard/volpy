@@ -4,16 +4,50 @@ import numpy as np
 
 import load_clean_lib
 from global_settings import *
-from vol_strat_lib import T_day_interpolation_CW
+from vol_strat_lib import T_day_interpolation_CW, T_day_interpolation_old, T_day_interpolation_linear
+
 
 def Calculate_CashFlow(df, current_price, next_price):
     return (next_price - (1+df["RF"]) * current_price).shift(1)
 
 def Calculate_return(df, current_price, next_price):
-    ret = (next_price / (current_price * (1 + df["RF"])) - 1).shift(1)
+    CF = Calculate_CashFlow(df, current_price, next_price)
+    ret =  CF / current_price.shift(1)
+
+    # ret = ((next_price - current_price) / current_price - df["RF"]).shift(1)
     # ret = ((next_price - (1+df["RF"]) * current_price) / current_price).shift(1)
     # ret = Calculate_CashFlow(df, current_price, next_price) / current_price.shift(-1)
     return ret
+
+def Calculate_return_EWMA(df, current_price, next_price):
+    CF = Calculate_CashFlow(df, current_price, next_price)
+
+    eps   = 0.02    # hard floor for raw prices
+    pct   = 0.01    # percentile for EWMA floor
+    alpha = 0.2     # EWMA smoothing factor
+
+    # 1) floor raw prices, preserving a Series
+    current_price = current_price.clip(lower=eps)
+
+    # 2) compute EWMA and shift it
+    ewma       = current_price.ewm(alpha=alpha, min_periods=5, adjust=False).mean()
+    ewma_prev  = ewma.shift(1)
+
+    # 3) find the 1%-quantile of the lagged EWMA (ignoring NaNs)
+    threshold = ewma_prev.quantile(pct)
+
+    # 4) floor the lagged EWMA at that empirical threshold
+    ewma_prev = ewma_prev.clip(lower=threshold)
+
+    # 5) division will produce NaN for the very first row (EWMA_prev is NaN there)
+    return CF / ewma_prev
+
+
+# def Calculate_EWMA_return(df, current_price, next_price):
+#     ret = ((next_price - current_price) / current_price - df["RF"]).shift(1)
+#     # ret = ((next_price - (1+df["RF"]) * current_price) / current_price).shift(1)
+#     # ret = Calculate_CashFlow(df, current_price, next_price) / current_price.shift(-1)
+#     return ret
 
 
 def prepare_for_sgys(df, curr_OTMs):
@@ -82,7 +116,7 @@ def D_PC_option_prices(df, OTMs):
                 for D_str in ["D_", ""]:
                     low_price_time = df[f"{D_str}low_{put_call}_{moneyness}_price{time}"]
                     high_price_time = df[f"{D_str}high_{put_call}_{moneyness}_price{time}"]
-                    df[f"{D_str}30_{put_call}_{moneyness}_price{time}"] = T_day_interpolation_CW(T1=T1, T2=T2, r1=low_price_time, r2=high_price_time)
+                    df[f"{D_str}30_{put_call}_{moneyness}_price{time}"] = T_day_interpolation_linear(T1=T1, T2=T2, r1=low_price_time, r2=high_price_time)
     return df
 
 def add_stock_sgy(df):
@@ -115,9 +149,12 @@ def add_put_and_call_sgy(df, OTMs, HL30_list = ["low", "high", "30"]):
 
                     CF = Calculate_CashFlow(df, current_price, next_price)
                     ret = Calculate_return(df, current_price, next_price)
+                    ret_EWMA = Calculate_return_EWMA(df, current_price, next_price)
 
                     new_columns[f"CF_{D_str}{low_high}_{put_call}_{moneyness}"] = CF
                     new_columns[f"r_{D_str}{low_high}_{put_call}_{moneyness}"] = ret
+                    new_columns[f"EWMA r_{D_str}{low_high}_{put_call}_{moneyness}"] = ret_EWMA
+
     new_cols_df = pd.DataFrame(new_columns, index=df.index)
     df = pd.concat([df, new_cols_df], axis=1)
     return df
@@ -143,9 +180,15 @@ def add_straddle_strangle_sgy(df, OTMs, HL30_list = ["low", "high", "30"]):
 
                 CF = Calculate_CashFlow(df, current_price, next_price)
                 ret = Calculate_return(df, current_price, next_price)
+                ret_EWMA = Calculate_return_EWMA(df, current_price, next_price)
+
+                new_columns[f"{D_str}{low_high}_{sgy_name}_curr_price"] = current_price
+                new_columns[f"{D_str}{low_high}_{sgy_name}_next_price"] = next_price
 
                 new_columns[f"CF_{D_str}{low_high}_{sgy_name}"] = CF
                 new_columns[f"r_{D_str}{low_high}_{sgy_name}"] = ret
+                new_columns[f"EWMA r_{D_str}{low_high}_{sgy_name}"] = ret_EWMA
+
     new_cols_df = pd.DataFrame(new_columns, index=df.index)
     df = pd.concat([df, new_cols_df], axis=1)
     return df
@@ -170,9 +213,11 @@ def add_butterfly_spread_sgy(df, OTMs, HL30_list = ["low", "high", "30"]):
 
                 CF = Calculate_CashFlow(df, current_price, next_price)
                 ret = Calculate_return(df, current_price, next_price)
+                ret_EWMA = Calculate_return_EWMA(df, current_price, next_price)
 
                 new_columns[f"CF_{D_str}{low_high}_{sgy_name}"] = CF
                 new_columns[f"r_{D_str}{low_high}_{sgy_name}"] = ret
+                new_columns[f"EWMA r_{D_str}{low_high}_{sgy_name}"] = ret_EWMA
 
     new_cols_df = pd.DataFrame(new_columns, index=df.index)
     df = pd.concat([df, new_cols_df], axis=1)
@@ -204,9 +249,11 @@ def add_condor_strangle_sgy(df, OTMs, HL30_list = ["low", "high", "30"]):
 
                     CF = Calculate_CashFlow(df, current_price, next_price)
                     ret = Calculate_return(df, current_price, next_price)
+                    ret_EWMA = Calculate_return_EWMA(df, current_price, next_price)
 
                     new_columns[f"CF_{D_str}{low_high}_{sgy_name}"] = CF
                     new_columns[f"r_{D_str}{low_high}_{sgy_name}"] = ret
+                    new_columns[f"EWMA r_{D_str}{low_high}_{sgy_name}"] = ret_EWMA
 
 
 
@@ -241,9 +288,11 @@ def add_stacked_straddle_sgy(df, OTMs, HL30_list = ["low", "high", "30"]):
 
                     CF = Calculate_CashFlow(df, current_price, next_price)
                     ret = Calculate_return(df, current_price, next_price)
+                    ret_EWMA = Calculate_return_EWMA(df, current_price, next_price)
 
                     df[f"CF_{D_str}{low_high}_{sgy_name}"] = CF
                     df[f"r_{D_str}{low_high}_{sgy_name}"] = ret
+                    df[f"EWMA r_{D_str}{low_high}_{sgy_name}"] = ret_EWMA
     return df
 
 
@@ -266,9 +315,11 @@ def add_full_stacked_straddle_sgy(df, OTMs, HL30_list = ["low", "high", "30"]):
 
             CF = Calculate_CashFlow(df, current_price, next_price)
             ret = Calculate_return(df, current_price, next_price)
+            ret_EWMA = Calculate_return_EWMA(df, current_price, next_price)
 
             df[f"CF_{D_str}{low_high}_{sgy_name}"] = CF
             df[f"r_{D_str}{low_high}_{sgy_name}"] = ret
+            df[f"EWMA r_{D_str}{low_high}_{sgy_name}"] = ret_EWMA
     return df
 
 
@@ -290,7 +341,9 @@ def add_full_stacked_strangle_sgy(df, OTMs, HL30_list = ["low", "high", "30"]):
 
             CF = Calculate_CashFlow(df, current_price, next_price)
             ret = Calculate_return(df, current_price, next_price)
+            ret_EWMA = Calculate_return_EWMA(df, current_price, next_price)
 
             df[f"CF_{D_str}{low_high}_{sgy_name}"] = CF
             df[f"r_{D_str}{low_high}_{sgy_name}"] = ret
+            df[f"EWMA r_{D_str}{low_high}_{sgy_name}"] = ret_EWMA
     return df
