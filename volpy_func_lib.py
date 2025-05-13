@@ -1094,11 +1094,7 @@ def interpolate_swaps_and_returns(df):
     ) * df["discount_factor_30d"]  # diskonteres
 
     # Casflow version baseret på markedsværdi af en daglig (-short) swap = long
-    df["CF_30_SW_day_noRF"] = - (
-            df["SW_m1_29"]  # fast ben er det samme
-            - df["SW_0_29"] * (T - 1) / T  # ny "rest" variabelt ben
-            - df["squared_return"] * 252 * 1 / T  # realiseret variabllt ben
-    )
+    df["CF_30_SW_day_noRF"] = df["CF_30_SW_day"] / df["discount_factor_30d"]
 
     df = df.loc[mask].copy() # Only keep if acceptable
 
@@ -1107,12 +1103,13 @@ def interpolate_swaps_and_returns(df):
 
     df["Average SW"] = df["SW_m1_29"].rolling(window=21, min_periods=5).mean()
     df["r_30_SW_day"] = df["CF_30_SW_day"] / df["Average SW"]
-    df["r_30_SW_day_noRF"] = df["CF_30_SW_day_noRF"] / df["Average SW"]
+    df["r_30_SW_day_scaled_full"] = df["CF_30_SW_day"] / df["SW_m1_29"]
+    # df["r_30_SW_day_noRF"] = df["CF_30_SW_day_noRF"] / df["Average SW"]
 
     for alpha in np.arange(5, 30, 5):
         df[f"EWMA SW .{alpha}"] = df["SW_m1_29"].ewm(alpha=alpha * 0.01, min_periods=5, adjust=False).mean()
         df[f"r_30_SW_day .{alpha}"] = df["CF_30_SW_day"] / df[f"EWMA SW .{alpha}"]
-        df[f"r_30_SW_day_noRF .{alpha}"] = df["CF_30_SW_day_noRF"] / df[f"EWMA SW .{alpha}"]
+        # df[f"r_30_SW_day_noRF .{alpha}"] = df["CF_30_SW_day_noRF"] / df[f"EWMA SW .{alpha}"]
 
 
     return df
@@ -1647,7 +1644,7 @@ def plot_diff_akk(df, tickers, from_date=None, to_date=None, logreturn=False):
 
 
 def create_sgy_list(sgy_common = "CF_D_30_", sgy_list = ["straddle", "strangle_15%", "call_ATM", "put_ATM"]):
-    return [sgy_common + sgy for sgy in sgy_list] + ["CF_30_SW_day", "r_30_SW_day"]
+    return [sgy_common + sgy for sgy in sgy_list] + ["CF_30_SW_day", "r_30_SW_day .25", "r_30_SW_day"]
 
 
 def return_df(df_big, sgy_list = create_sgy_list(), ticker_list = ["SPX"], extra_columns = []):
@@ -1739,12 +1736,12 @@ def scale_columns_to_r_stock_average(df, sgy_list, ref_column="r_stock"):
     return df
 
 
-def plot_returns(df, sgy_common, sgy_names, factors = [], figsize=(30, 10), lw = 0.5, fig_name = None):
+def plot_returns(df, sgy_common, sgy_names, factors = [], figsize=(30, 10), lw = 0.5, fig_name = None, prefix = ""):
     plt.figure(figsize=figsize)
 
     for sgy_name in sgy_names:
 
-        formatted = rf"{sgy_name}".replace("_", " ").title().replace("Otm", "OTM").replace("Atm", "ATM")
+        formatted = rf"{prefix}{sgy_name}".replace("_", " ").title().replace("Otm", "OTM").replace("Atm", "ATM")
 
         sgy_str = sgy_common + sgy_name
         plt.plot(df["date"], np.cumsum(df[f"{sgy_str}"]), label=formatted, alpha=0.8, lw = lw)
@@ -1757,7 +1754,8 @@ def plot_returns(df, sgy_common, sgy_names, factors = [], figsize=(30, 10), lw =
 
     plt.plot(df["date"], np.cumsum(df["CF_30_SW_day"]), label = "Swap day", lw = 3*lw)
 
-    plt.plot(df["date"], np.cumsum(df["r_30_SW_day"]), label = "Swap day (SW scaled)", lw = 3*lw)
+    # plt.plot(df["date"], np.cumsum(df["r_30_SW_day .25"]), label = "Swap day (SW scaled)", lw = 3*lw)
+    plt.plot(df["date"], np.cumsum(df["r_30_SW_day_scaled_full"]), label = "Swap day (SW scaled)", lw = 3*lw)
 
 
     plt.grid()
@@ -1782,7 +1780,7 @@ def plot_returns(df, sgy_common, sgy_names, factors = [], figsize=(30, 10), lw =
 # missing ticker
 def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strangle_15%", "call_ATM", "put_ATM"],
                    factors=['Mkt', 'SPX', 'SMB', 'HML', 'RMW', 'CMA', 'UMD', 'BAB', 'QMJ', 'RF'], vol_index = False, sign=True,
-                   scale=True, plot = False, ticker_list = None, extra_columns = [], figsize = (30, 10), extra_scale_columns = [], lw = 0.5, fig_name = None):
+                   scale=True, plot = False, ticker_list = None, extra_columns = [], figsize = (30, 10), extra_scale_columns = [], lw = 0.5, fig_name = None, prefix = ""):
     if sgy_names is None:
         sgy_names = [col.replace(sgy_common, "") for col in df.columns if sgy_common in col]
 
@@ -1790,10 +1788,9 @@ def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strang
         ticker_list = list(df["ticker"].unique())
 
     sgy_list = create_sgy_list(sgy_common, sgy_names)
-
-
-
     df = return_df(df, sgy_list = sgy_list, ticker_list = ticker_list, extra_columns = extra_columns + extra_scale_columns)
+    df.dropna(subset = sgy_list, inplace = True)
+
 
     if vol_index:   vol_symbols = load_clean_lib.vol_symbols
     else:           vol_symbols = []
@@ -1806,7 +1803,7 @@ def make_df_strats(df, sgy_common = "CF_D_30_", sgy_names = ["straddle", "strang
 
     if plot:
         factors = [col for col in factors if col != "RF"]
-        plot_returns(df, sgy_common, sgy_names, factors, figsize, lw, fig_name)
+        plot_returns(df, sgy_common, sgy_names, factors, figsize, lw, fig_name, prefix)
 
     return df
 
@@ -1886,7 +1883,7 @@ def compute_performance_measures_cashflows(df, cvar_alpha=0.05):
     return pd.DataFrame(results).T
 
 
-def compute_extensive_performance_measures_cashflows(df, cvar_alpha=0.05, periods_per_year=252):
+def compute_extensive_performance_measures_cashflows(df, cvar_alpha=0.05, periods_per_year=252, include_jensens_alpha = False):
     # Drop unnecessary columns and convert to numeric values
     df = df.drop(columns=["date", "RF"], errors="ignore")
     df = df.apply(pd.to_numeric, errors='coerce')
@@ -1997,6 +1994,24 @@ def compute_extensive_performance_measures_cashflows(df, cvar_alpha=0.05, period
         # Lag-1 Autocorrelation (daily data)
         autocorr = data.autocorr(lag=1)
 
+        if include_jensens_alpha:
+            # align data dates
+            mkt = df["SPX"]
+            ret = data
+
+            # estimate beta
+            cov = np.cov(ret, mkt)[0,1]
+            beta = cov / mkt.var()
+
+            # annualize market return
+            mkt_annual = mkt.mean() * periods_per_year
+
+            # Jensen's alpha = portfolio return – [Rf + β*(Rm–Rf)]
+            # here RF≈0 since you've dropped RF; otherwise add RF back in
+            jensen = annualized_mean - beta * mkt_annual
+            if abs(jensen) < 1e-5:
+                jensen = 0
+
         results[col] = {
             "Mean": annualized_mean,
             "SD": annualized_std,
@@ -2015,6 +2030,12 @@ def compute_extensive_performance_measures_cashflows(df, cvar_alpha=0.05, period
             r"Tail 1\%": tail_ratio_10,
             r"Tail 0.1\%": tail_ratio_01,
         }
+        if include_jensens_alpha:
+            results[col]["Alpha"] = jensen
+
+    results_df = pd.DataFrame(results) * 100
+    return pd.DataFrame(results_df)
+
     # "Mean": annualized_mean,
     # "Std Dev": annualized_std,
     # "Skew": skew(data),
@@ -2038,9 +2059,6 @@ def compute_extensive_performance_measures_cashflows(df, cvar_alpha=0.05, period
     # "Profit Factor": profit_factor,
     # "Tail Ratio (0.5%)": tail_ratio_05,
     # "Recovery Duration (years)": recovery_duration_years,
-
-    results_df = pd.DataFrame(results) * 100
-    return pd.DataFrame(results_df)
 
 
 
@@ -2424,15 +2442,17 @@ _ASSET_CLASS = {
     # Equity Markets (0)
     'SPX': 0, 'OEX': 0, 'OEF': 0, "DJX": 0, 'QQQ': 0, 'NDX': 0, 'SPY':0, 'DIA':0, 'VGK': 0, 'FXI': 0, 'EWJ': 0, 'EWZ': 0,
     'INDA': 0, 'EZA': 0, 'EWC': 0, 'EWU': 0, 'EWY': 0, 'EEM': 0,
-    'EWA': 0, 'EWW': 0, 'VNQ': 0, "EFA": 0,
+    'EWA': 0, 'EWW': 0, 'VNQ': 0, "EFA": 0, "EWU_combined": 0,
     # Fixed Income (1)
     'TLT': 1, 'SHY': 1, 'TIP': 1, 'LQD': 1, 'HYG': 1, 'EMB': 1,
     # Commodities (2)
     'IAU': 2, 'SLV': 2, 'UNG': 2, 'USO': 2, "GLD": 2,
     # Currency (3)
     'UUP': 3, 'FXE': 3, 'FXY': 3, 'CEW': 3,
-    # None of the above
-    'UVXY': 4, 'BITO': 4,
+    # Crypto Currency (4)
+    'BITO': 4,
+    # None of the above (5)
+    'UVXY': 5,
 }
 def ticker_to_asset_code(ticker: str) -> int:
     """
@@ -2664,7 +2684,7 @@ OEX_tickers = ["OEX", "OEF", "NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "E
 OEX_tickers_constituents = ["NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JCI", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MDT", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "COV", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "ACN", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "LIN", "TMUS", "SCHW", "AMD", "DE", "INTU"]
 
 # Cross-AM, VIX and Liquid ticker sets
-Cross_AM_tickers = ['GLD', 'EFA', "SPX", "VGK", "EEM", "FXI", "EWJ", "EWZ", "INDA", "EZA", "EWC", "EWU_combined", "EWY", "EWA", "EWW", "VNQ", "TIP", "LQD", "HYG", "EMB", "IAU", "SLV", "UNG", "USO", "UVXY", "UUP", "FXE", "FXY", "BITO", "CEW", "SHY", "TLT"]
+Cross_AM_tickers = ['GLD', 'EFA', "SPX", "VGK", "EEM", "FXI", "EWJ", "EWZ", "INDA", "EZA", "EWC", "EWU_combined", "EWY", "EWA", "EWW", "VNQ", "TIP", "LQD", "HYG", "EMB", "IAU", "SLV", "UNG", "USO", "UVXY", "UUP", "FXE", "FXY", "BITO", "SHY", "TLT"]
 VIX_tickers = ['GLD', 'EFA', 'RUT', 'IBM', 'GS', 'AAPL', 'AMZN', 'GOOG', 'SPX', 'DJX', 'EEM', 'EWZ', 'TLT', 'USO', 'NDX']
 Liquid_ETF_Idx_tickers = Index_tickers + ETF_tickers
 Liquid_stock_tickers = ['GOOG', 'BKNG', 'TSLA', 'GOOGL', 'AMZN', 'META', 'NFLX',
@@ -2673,7 +2693,6 @@ Liquid_stock_tickers = ['GOOG', 'BKNG', 'TSLA', 'GOOGL', 'AMZN', 'META', 'NFLX',
        'DE', 'BIIB', 'DIS', 'JPM', 'CAT', 'OXY', 'COST', 'MET', 'ACN',
        'COF', 'IBM', 'GILD', 'C', 'QCOM', 'UNH', 'CVS', "WFC"]
 Liquid_tickers = Liquid_ETF_Idx_tickers + Liquid_stock_tickers
-
 
 
 
@@ -2729,6 +2748,7 @@ def clean_option_names(df):
         .str.replace('Otm', 'OTM')
         .str.replace('Cf Sw', 'CF SW')
         .str.replace('Cf', 'CF')
+        .str.replace('Spx', 'SPX')
     )
     return df
 

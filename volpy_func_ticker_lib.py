@@ -1073,7 +1073,7 @@ def concat_output_ticker_datasets(
 
 def concat_ticker_datasets(
     ticker_list: list[str],
-    df_name:    str,
+    df_name:    str
 ) -> pd.DataFrame:
     """
     For each ticker in ticker_list, load

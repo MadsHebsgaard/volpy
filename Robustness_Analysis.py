@@ -265,7 +265,7 @@ def price_model(F_arr, K_arr, T_arr, cp_flag_arr, ticker_arr, v0_arr,
 # --- helper to build test DataFrame
 def create_fake_option_df(TTM = 1/12.):
     K_low  = np.array([80, 90, 100, 110, 120])
-    K_high = np.arange(40,180,2)
+    K_high = np.arange(10,190,2)
     base = pd.DataFrame({'F':[100], 't_days': [0], 't_TTM':[TTM],'r':[0.056],'IV':[np.nan]})
     tickers = ['BS','MJD','Heston','SVMJD']
     frames = []
@@ -308,15 +308,15 @@ def main_table(df_merged):
                 r"& $\sigma_t^2$ "
                 r"& $\mathbb{E^Q}[RV]$ "
                 r"& $\widehat{SW}$ "
-                r"& Total error "
-                r"& Percentage error "
-                r"& Jump error $(\varepsilon)$ \\[-0.5ex]" + "\n")
+                r"& Total error ($\varepsilon$)"
+                r"& Error rate"
+                r"& Jump error $(\varepsilon_J)$ \\[-0.5ex]" + "\n")
         f.write(r"            &  "
                 r"&  "
                 r"&  "
                 r"&  "
                 r"& $(\mathbb{E^Q}[RV]-\widehat{SW})$ "
-                r"& $(\text{Total error} / \mathbb{E^Q}[RV])$ "
+                r"& $(\varepsilon / \mathbb{E^Q}[RV])$ "
                 r"&  \\" + "\n")
         f.write(r"            \midrule" + "\n")
 
