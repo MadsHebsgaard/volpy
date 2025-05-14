@@ -1659,7 +1659,7 @@ def return_df(df_big, sgy_list = create_sgy_list(), ticker_list = ["SPX"], extra
     return df
 
 
-def scale_columns_to_r_stock_std_dev(df, sgy_list, ref_column="r_stock"):
+def scale_columns_to_r_stock_std_dev(df, sgy_list, ref_column="r_stock", std = None):
     """
     Scale the columns in sgy_list within the dataframe df so that each has the same volatility
     (standard deviation) as the reference column, default 'r_stock'.
@@ -1673,11 +1673,15 @@ def scale_columns_to_r_stock_std_dev(df, sgy_list, ref_column="r_stock"):
     - df: The dataframe with scaled columns.
     """
     # Ensure the reference column exists.
-    if ref_column not in df.columns:
-        raise ValueError(f"Reference column '{ref_column}' not found in DataFrame.")
 
     # Calculate the standard deviation (volatility) of the reference column.
-    ref_vol = df[ref_column].std()
+    if std is not None:
+        ref_vol = std
+    else:
+        if ref_column not in df.columns:
+            raise ValueError(f"Reference column '{ref_column}' not found in DataFrame.")
+
+        ref_vol = df[ref_column].std()
 
     # Loop through each column in sgy_list and scale it.
     for col in sgy_list:
@@ -1883,7 +1887,7 @@ def compute_performance_measures_cashflows(df, cvar_alpha=0.05):
     return pd.DataFrame(results).T
 
 
-def compute_extensive_performance_measures_cashflows(df, cvar_alpha=0.05, periods_per_year=252, include_jensens_alpha = False):
+def  compute_extensive_performance_measures_cashflows(df, cvar_alpha=0.05, periods_per_year=252, include_jensens_alpha = False):
     # Drop unnecessary columns and convert to numeric values
     df = df.drop(columns=["date", "RF"], errors="ignore")
     df = df.apply(pd.to_numeric, errors='coerce')
@@ -2594,14 +2598,14 @@ name_overrides = {
     "GLD":  "Gold ETF",
 }
 
-def ticker_list_to_ordered_map(ticker_list):
+def ticker_list_to_ordered_map(ticker_list, index = "ticker"):
     base_dir      = load_clean_lib.Option_metrics_path_from_profile()
     bloomberg_dir = base_dir / "Tickers" / "index data"
     security_map  = pd.read_excel(bloomberg_dir / "Security_map.xlsx")
     # keep only tickers in the list, then reindex to preserve the list order
     security_map = (
         security_map
-        .set_index("ticker")
+        .set_index(index)
         .loc[ticker_list]          # filters & orders by ticker_list
         .reset_index()             # bring 'ticker' back as a column
     )
@@ -2678,7 +2682,7 @@ ALL_tickers_old = get_unique_tickers([OEX_tickers_old, Cross_AM_tickers_old, VIX
 # all
 All_tickers_original = ["NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "TMUS", "SCHW", "AMD", "DE", "INTU", "UK", "GT", "TRV", "SHW", "LIN", "GX", "JCI", "MDT", "COV", "ACN", "OEX", "SPX", "DJX", "BITO", "CEW", "DIA", "EEM", "EMB", "EWA", "EWC", "EWJ", "EWU_old", "EWW", "EWY", "EWZ", "EZA", "FXE", "FXI", "FXY", "HYG", "IAU", "INDA", "INDU", "IWM", "LQD", "OEF", "QQQ", "SHY", "SLV", "SPY", "TIP", "TLT", "USO", "UUP", "VGK", "VNQ", "UNG", "UVXY", "NDX", "EWU"]
 All_tickers =  ["GLD", "EFA", "RUT","NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "TMUS", "SCHW", "AMD", "DE", "INTU", "UK", "GT", "TRV", "SHW", "LIN", "GX", "JCI", "MDT", "COV", "ACN", "OEX", "SPX", "DJX", "BITO", "CEW", "DIA", "EEM", "EMB", "EWA", "EWC", "EWJ", "EWW", "EWY", "EWZ", "EZA", "FXE", "FXI", "FXY", "HYG", "IAU", "INDA", "INDU", "IWM", "LQD", "OEF", "QQQ", "SHY", "SLV", "SPY", "TIP", "TLT", "USO", "UUP", "VGK", "VNQ", "UNG", "UVXY", "NDX", "EWU_combined"]
-DJX_tickers = ["DJX", "UK", "DD_eidp", "JPM", "S_sears", "AA", "AXP", "BA", "C", "CAT", "CVX", "DIS", "EK", "GE", "GT", "HON", "HPQ", "IBM", "IP", "JNJ", "KO", "MCD", "MMM", "MO", "MRK", "PG", "RTX", "T", "WMT", "XOM", "T_old", "HD", "INTC", "MSFT", "AIG", "PFE", "VZ", "BAC", "MDLZ", "CSCO", "TRV", "UNH", "GS", "NKE", "V", "AAPL", "DD", "WBA", "DOW_inc", "AMGN", "CRM", "AMZN", "NVDA", "SHW"]
+DJX_tickers = ["DJX", "DIA", "UK", "DD_eidp", "JPM", "S_sears", "AA", "AXP", "BA", "C", "CAT", "CVX", "DIS", "EK", "GE", "GT", "HON", "HPQ", "IBM", "IP", "JNJ", "KO", "MCD", "MMM", "MO", "MRK", "PG", "RTX", "T", "WMT", "XOM", "T_old", "HD", "INTC", "MSFT", "AIG", "PFE", "VZ", "BAC", "MDLZ", "CSCO", "TRV", "UNH", "GS", "NKE", "V", "AAPL", "DD", "WBA", "DOW_inc", "AMGN", "CRM", "AMZN", "NVDA", "SHW"]
 DJX_tickers_constituents = ["UK", "DD_eidp", "JPM", "S_sears", "AA", "AXP", "BA", "C", "CAT", "CVX", "DIS", "EK", "GE", "GT", "HON", "HPQ", "IBM", "IP", "JNJ", "KO", "MCD", "MMM", "MO", "MRK", "PG", "RTX", "T", "WMT", "XOM", "T_old", "HD", "INTC", "MSFT", "AIG", "PFE", "VZ", "BAC", "MDLZ", "CSCO", "TRV", "UNH", "GS", "NKE", "V", "AAPL", "DD", "WBA", "DOW_inc", "AMGN", "CRM", "AMZN", "NVDA", "SHW"]
 OEX_tickers = ["OEX", "OEF", "NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JCI", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MDT", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "COV", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "ACN", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "LIN", "TMUS", "SCHW", "AMD", "DE", "INTU"]
 OEX_tickers_constituents = ["NSM", "G", "DOW_chem", "DD_eidp", "LU", "MEDI", "EMC", "CCU", "UBAN", "HCA", "ONE", "S_sears", "T_old", "PHA", "AGC", "MAY", "AA", "AEP", "AES", "AIG", "AMGN", "ATI", "AVP", "AXP", "BA", "BAC", "BAX", "BBWI", "BDK", "BHGE", "BMY", "BNI", "C", "CGP", "CI", "CL", "CPB", "DXC", "CSCO", "DAL", "DIS", "EK", "ENE", "ETR", "EXC", "F", "FDX", "GX", "GD", "GE", "HAL", "HD", "HET", "HIG", "HNZ", "HON", "HPQ", "HSH", "IBM", "INTC", "IP", "JCI", "JNJ", "JPM", "KO", "LEH", "MCD", "MER", "MMM", "MRK", "MS", "MSFT", "NT", "NSC", "NXTL", "OMX", "ORCL", "PARA", "PEP", "PFE", "PG", "RAL", "ROK", "RSH", "RTN", "RTX", "SLB", "SO", "TOY", "TWX", "TXN", "UIS", "VZ", "WFC", "WMB", "WMT", "WY", "XOM", "XRX", "EP", "USB", "T", "BUD", "MDT", "MO", "GS", "ALL", "DELL", "CMCSA", "S", "ABT", "CAT", "TGT", "CVX", "UPS", "WB", "COF", "COP", "GOOGL", "RF", "CVS", "AAPL", "MDLZ", "BK", "COV", "NYX", "PM", "UNH", "NOV", "MA", "OXY", "QCOM", "DVN", "GILD", "LMT", "LOW", "NKE", "SGP", "WBA", "WYE", "MON", "AMZN", "COST", "MET", "FCX", "TFCFA", "BRK", "APA", "EMR", "UNP", "V", "ACN", "APC", "EBAY", "LLY", "SBUX", "SPG", "ABBV", "GM", "META", "BIIB", "GOOG", "CELG", "KMI", "BKNG", "CMCSK", "PYPL", "TFCF", "BLK", "DHR", "DUK", "NEE", "KHC", "CHTR", "DD", "NFLX", "NVDA", "GTX", "ADBE", "DOW_inc", "TMO", "AMT", "CRM", "TSLA", "AVGO", "LIN", "TMUS", "SCHW", "AMD", "DE", "INTU"]

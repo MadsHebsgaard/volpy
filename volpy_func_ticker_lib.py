@@ -1036,6 +1036,7 @@ def create_option_sgys_ticker_parallel(
 def concat_output_ticker_datasets(
     ticker_list: list[str],
     df_name:    str,
+    folder_version = "_om",
 ) -> pd.DataFrame:
     """
     For each ticker in ticker_list, load
@@ -1047,7 +1048,7 @@ def concat_output_ticker_datasets(
     Adds a 'ticker' column to identify origin.
     """
     base_dir = load_clean_lib.Option_metrics_path_from_profile()
-    out_dir  = base_dir / "Tickers" / "Output" / days_type()
+    out_dir  = base_dir / "Tickers" / f"Output{folder_version}" / days_type()
     frames   = []
 
     for ticker in ticker_list:
@@ -1073,7 +1074,8 @@ def concat_output_ticker_datasets(
 
 def concat_ticker_datasets(
     ticker_list: list[str],
-    df_name:    str
+    df_name:    str,
+    folder_version = "",
 ) -> pd.DataFrame:
     """
     For each ticker in ticker_list, load
@@ -1085,7 +1087,7 @@ def concat_ticker_datasets(
     Adds a 'ticker' column to identify origin.
     """
     base_dir = load_clean_lib.Option_metrics_path_from_profile()
-    dir  = base_dir / "Tickers" / "SumAndOrpy" / days_type() / df_name
+    dir  = base_dir / "Tickers" / f"SumAndOrpy{folder_version}" / days_type() / df_name
     frames   = []
     skipped = []
 

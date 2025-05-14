@@ -1508,7 +1508,7 @@ from table_lib import sort_table_df
 
 def save_capm_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
     tex, df = capm_table(returns_df, name, y_var, max_lags = max_lags)
-    with open(f"figures/Analysis/Factor models/{name}_{y_var.replace("/", "_")}_f1.tex", "w") as f:
+    with open(fr"figures/Analysis/Factor models/{name}_{y_var.replace("/", "_")}_f1.tex", "w") as f:
         f.write(tex)
     return df
 
@@ -2317,8 +2317,11 @@ def vol_period_analysis(sum_df, name, split_method):
         how='left'
     )
 
-    # start with all unique tickers
-    tickers = df['ticker'].unique()
+
+
+    # start with all unique tickers in the right order (using CarrWu2009_table_2 to sort for ease of use)
+    tickers_out = CarrWu2009_table_2(df, "Liquid", save_latex=False)["ticker"].unique()
+    tickers = ticker_list_to_ordered_map(tickers_out, "ticker_out")["ticker"]
     period_df = pd.DataFrame({'ticker': tickers})
 
     # loop over your three periods
@@ -2449,3 +2452,168 @@ def vol_period_analysis_latex(out, name, split_method):
     with open(f"figures/Analysis/Period/{name}_{split_method}_period_analysis.tex", "w") as f:
         f.write(latex)
 
+
+
+
+
+def make_bid_ask_table(t2_bid, t3_bid, t2_ask, t3_ask, name,
+                       caption="Period-by-period SW, VRP, and LVRP (bid vs. ask)",
+                       label="tab:period_metrics_bid_ask"):
+    """
+    t2_* should have columns ['ticker', ..., 'Mean_SW', ...]
+    t3_* should have columns ['ticker', ..., 'Mean_diff','t_diff','Mean_ln','t_ln', ...]
+    """
+    # align by ticker
+    t2b = t2_bid.set_index('ticker')
+    t3b = t3_bid.set_index('ticker')
+    t2a = t2_ask.set_index('ticker')
+    t3a = t3_ask.set_index('ticker')
+    tickers = t2b.index.intersection(t2a.index).intersection(t3b.index).intersection(t3a.index)
+
+    # header
+    lines = [
+        r"\begin{table}[htbp]",
+        r"  \centering",
+        r"  \setlength{\tabcolsep}{3pt}",
+        r"  \scalebox{0.7}{%",
+        r"    \begin{tabular}{l|rr|rr|rr}",
+        r"      \toprule",
+        r"      & \multicolumn{2}{c}{SW\times100}",
+        r"      & \multicolumn{2}{c}{(RV - SW)\times100}",
+        r"      & \multicolumn{2}{c}{$\ln(RV / SW)$} \\",
+        r"      \cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7}",
+        r"      Ticker & \multicolumn{1}{c}{bid} & \multicolumn{1}{c}{ask} & \multicolumn{1}{c}{bid} & \multicolumn{1}{c}{ask} & \multicolumn{1}{c}{bid} & \multicolumn{1}{c}{ask} \\",
+        r"      \midrule",
+    ]
+
+    # rows
+    for t in tickers:
+        sw_b = t2b.at[t, 'Mean_SW']
+        sw_a = t2a.at[t, 'Mean_SW']
+        v_b = t3b.at[t, 'Mean_diff']
+        v_a = t3a.at[t, 'Mean_diff']
+        tv_b = t3b.at[t, 't_diff']
+        tv_a = t3a.at[t, 't_diff']
+        l_b = t3b.at[t, 'Mean_ln']
+        l_a = t3a.at[t, 'Mean_ln']
+        tl_b = t3b.at[t, 't_ln']
+        tl_a = t3a.at[t, 't_ln']
+
+        line = (
+            f"{t} & "
+            f"{sw_b:.2f} & {sw_a:.2f} & "
+            f"{v_b:.2f}\\,({tv_b:.2f}) & {v_a:.2f}\\,({tv_a:.2f}) & "
+            f"{l_b:.2f}\\,({tl_b:.2f}) & {l_a:.2f}\\,({tl_a:.2f}) \\\\"
+        )
+        lines.append("      " + line)
+
+    # footer
+    lines += [
+        r"      \bottomrule",
+        r"    \end{tabular}%",
+        r"  }",
+        rf"  \caption{{{caption}}}",
+        rf"  \label{{{label}}}",
+        r"\end{table}"
+    ]
+
+    latex = "\n".join(lines)
+    with open(f"figures/Analysis/Implementability/{name}_bid_ask_table.tex", "w") as f:
+        f.write(latex)
+
+    return latex
+
+
+def make_bid_ask_table_ff5(
+    t2_bid,
+    t3_bid,
+    t2_ask,
+    t3_ask,
+    tff5_bid,
+    tff5_ask,
+    name,
+    caption="Period-by-period SW, VRP, LVRP, and alpha (F5) (bid vs. ask)",
+    label="tab:period_metrics_bid_ask"
+):
+    r"""
+    t2_* should have columns ['ticker', ..., 'Mean_SW', ...]
+    t3_* should have columns ['ticker', ..., 'Mean_diff','t_diff','Mean_ln','t_ln', ...]
+    tff5_* should have column ['\\(\\alpha\\)'] with pre-formatted LaTeX strings
+    """
+    # align by ticker
+    t2b = t2_bid.set_index('ticker')
+    t3b = t3_bid.set_index('ticker')
+    t2a = t2_ask.set_index('ticker')
+    t3a = t3_ask.set_index('ticker')
+    t5b = tff5_bid.set_index('ticker')
+    t5a = tff5_ask.set_index('ticker')
+
+    tickers = (
+        t2b.index
+          .intersection(t2a.index)
+          .intersection(t3b.index)
+          .intersection(t3a.index)
+          .intersection(t5b.index)
+          .intersection(t5a.index)
+    )
+
+    # header
+    lines = [
+        r"\begin{table}[htbp]",
+        r"  \centering",
+        r"  \setlength{\tabcolsep}{3pt}",
+        r"  \scalebox{0.7}{%",
+        r"    \begin{tabular}{l|rr|rr|rr|rr}",
+        r"      \toprule",
+        r"      & \multicolumn{2}{c}{SW$\times$100}",
+        r"      & \multicolumn{2}{c}{(RV - SW)$\times$100}",
+        r"      & \multicolumn{2}{c}{$\ln(\text{RV} / \text{SW})$}",
+        r"      & \multicolumn{2}{c}{alpha$^\text{F$_5$}$} \\",
+        r"      \cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7} \cmidrule(lr){8-9}",
+        r"      Ticker & \multicolumn{1}{c}{bid} & \multicolumn{1}{c}{ask} & \multicolumn{1}{c}{bid} & \multicolumn{1}{c}{ask} & \multicolumn{1}{c}{bid} & \multicolumn{1}{c}{ask} & \multicolumn{1}{c}{bid} & \multicolumn{1}{c}{ask} \\",
+        r"      \midrule",
+    ]
+
+    # rows
+    for t in tickers:
+        sw_b = t2b.at[t, 'Mean_SW']
+        sw_a = t2a.at[t, 'Mean_SW']
+        v_b = t3b.at[t, 'Mean_diff']
+        v_a = t3a.at[t, 'Mean_diff']
+        tv_b = t3b.at[t, 't_diff']
+        tv_a = t3a.at[t, 't_diff']
+        l_b = t3b.at[t, 'Mean_ln']
+        l_a = t3a.at[t, 'Mean_ln']
+        tl_b = t3b.at[t, 't_ln']
+        tl_a = t3a.at[t, 't_ln']
+        alpha_b_raw = t5b.at[t, '\\(\\alpha\\)']
+        alpha_a_raw = t5a.at[t, '\\(\\alpha\\)']
+
+        # format alpha: replace newline with LaTeX spacing
+        alpha_b = alpha_b_raw.replace("\n", "\\, ")
+        alpha_a = alpha_a_raw.replace("\n", "\\, ")
+
+        line = (
+            fr"{t} & {sw_b:.2f} & {sw_a:.2f} & "
+            fr"{v_b:.2f}\, ({tv_b:.2f}) & {v_a:.2f}\, ({tv_a:.2f}) & "
+            fr"{l_b:.2f}\, ({tl_b:.2f}) & {l_a:.2f}\, ({tl_a:.2f}) & "
+            fr"{alpha_b} & {alpha_a} \\"
+        )
+        lines.append("      " + line)
+
+    # footer
+    lines += [
+        r"      \bottomrule",
+        r"    \end{tabular}%",
+        r"  }",
+        rf"  \caption{{{caption}}}",
+        rf"  \label{{{label}}}",
+        r"\end{table}"
+    ]
+
+    latex = "\n".join(lines)
+    file_path = f"figures/Analysis/Implementability/{name}_bid_ask_table_ff5.tex"
+    with open(file_path, "w") as f:
+        f.write(latex)
+
+    return latex
