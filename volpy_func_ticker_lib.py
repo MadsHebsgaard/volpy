@@ -1072,10 +1072,73 @@ def concat_output_ticker_datasets(
     return pd.concat(frames, ignore_index=True)
 
 
+from pathlib import Path
+
+def total_csv_lines_no_load(
+    ticker_list: list[str],
+    df_name: str,
+    folder_version: str = "_om",
+) -> int:
+    base_dir = load_clean_lib.Option_metrics_path_from_profile()
+    out_dir  = base_dir / "Tickers" / f"Output{folder_version}" / days_type()
+    total = 0
+
+    for ticker in ticker_list:
+        path = out_dir / ticker / f"{df_name}.csv"
+        if not path.exists():
+            print(f"Warning: {path!r} not found; skipping {ticker}.")
+            continue
+
+        # stream-count each line; headers + data
+        with path.open("r", encoding="utf-8", errors="ignore") as f:
+            for _ in f:
+                total += 1
+
+    return total
+
+
+
+import subprocess
+
+def total_lines_via_wc(ticker_list: list[str],
+                       df_name: str,
+                       folder_version: str = "_om"
+                       ) -> int:
+    base_dir = load_clean_lib.Option_metrics_path_from_profile()
+    out_dir  = base_dir / "Tickers" / f"Output{folder_version}" / days_type()
+
+    # build list of existing files
+    files = [
+        str(out_dir / ticker / f"{df_name}.csv")
+        for ticker in ticker_list
+    ]
+    existing = [f for f in files if Path(f).exists()]
+    if not existing:
+        return 0
+
+    # run wc -l on all files in one go
+    result = subprocess.run(
+        ["wc", "-l", *existing],
+        capture_output=True,
+        text=True,
+        check=True
+    )
+
+    # parse each line "   1234 filename" + final "  5678 total"
+    total = 0
+    for line in result.stdout.splitlines():
+        count = int(line.strip().split()[0])
+        total += count
+    return total
+
+
+
+
+
 def concat_ticker_datasets(
     ticker_list: list[str],
     df_name:    str,
-    folder_version = "",
+    folder_version = "_om",
 ) -> pd.DataFrame:
     """
     For each ticker in ticker_list, load

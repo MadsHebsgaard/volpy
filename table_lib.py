@@ -2321,7 +2321,9 @@ def vol_period_analysis(sum_df, name, split_method):
 
     # start with all unique tickers in the right order (using CarrWu2009_table_2 to sort for ease of use)
     tickers_out = CarrWu2009_table_2(df, "Liquid", save_latex=False)["ticker"].unique()
-    tickers = ticker_list_to_ordered_map(tickers_out, "ticker_out")["ticker"]
+    # tickers = ticker_list_to_ordered_map(tickers_out, "ticker_out")["ticker"]
+
+    tickers = tickers_out
     period_df = pd.DataFrame({'ticker': tickers})
 
     # loop over your three periods
