@@ -1108,6 +1108,7 @@ def interpolate_swaps_and_returns(df):
 
     for alpha in np.arange(5, 30, 5):
         df[f"EWMA SW .{alpha}"] = df["SW_m1_29"].ewm(alpha=alpha * 0.01, min_periods=5, adjust=False).mean()
+
         df[f"r_30_SW_day .{alpha}"] = df["CF_30_SW_day"] / df[f"EWMA SW .{alpha}"]
         # df[f"r_30_SW_day_noRF .{alpha}"] = df["CF_30_SW_day_noRF"] / df[f"EWMA SW .{alpha}"]
 

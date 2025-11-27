@@ -816,66 +816,174 @@ def CarrWu2009_table_3_latex_v2(table_df, name):
     return "\n".join(lines)
 
 
-def CarrWu2009_table_3_latex(table_df):
+def CarrWu2009_table_3_with_names(df, name, save_latex = True):
+    # ensure output dir
+    os.makedirs("figures/Analysis", exist_ok=True)
+
+    # 1) Prep the data
+    df = df.dropna(subset=["RV", "SW_0_30"]).copy()
+    df["diff"]    = df["RV"] - df["SW_0_30"]
+    df["lnratio"] = np.log(df["RV"]) - np.log(df["SW_0_30"])
+
+    # 1) add this helper right after newey_west_t_stat
+    def newey_west_std(series, lag=21):
+        x = np.asarray(series)
+        n = len(x)
+        if n == 0:
+            return np.nan
+        x_bar = np.mean(x)
+        # γ₀ and γ_s as in your t-stat
+        gamma0 = np.mean((x - x_bar) ** 2)
+        gamma_s = [
+            np.sum((x[s:] - x_bar) * (x[:-s] - x_bar)) / n
+            for s in range(1, lag + 1) if n - s > 0
+        ]
+        weights = [1 - s / (lag + 1) for s in range(1, lag + 1)]
+        # long-run variance of the series
+        longrun_var = gamma0 + 2 * sum(w * g for w, g in zip(weights, gamma_s))
+        return np.sqrt(longrun_var)
+
+    # 2) in your compute_stats(), capture this NW std
+    def compute_stats(series):
+        mean_ = series.mean()
+        std_ = series.std()  # you can keep this if you still want “Std”
+        # auto_ = series.autocorr(lag=21)
+        # skew_ = series.skew()
+        # kurt_ = series.kurt()
+        t_ = newey_west_t_stat(series, lag=21)
+        # nw_std = newey_west_std(series, lag=21)
+        return pd.Series({
+            "Mean": mean_,
+            "Std": std_,
+            # "Auto": auto_,
+            # "Skew": skew_,
+            # "Kurt": kurt_,
+            "t": t_,
+            # "NW_std": nw_std  # ← new column
+        })
+
+
+    # Panel A: (RV - SW_0_30) × 100
+    df_diff = (
+        df
+        .groupby("ticker", group_keys=False)
+        .apply(lambda g: compute_stats(g["diff"] * 100))
+        .reset_index()
+    )
+    # df_diff = df_diff.drop(columns=["NW_std"])
+    df_diff.columns = [
+        "ticker",
+        "Mean_diff", "Std_diff", "t_diff"
+    ]
+
+    # Panel B: ln(RV / SW_0_30)
+    df_ln = (
+        df
+        .groupby("ticker", group_keys=False)
+        .apply(lambda g: compute_stats(g["lnratio"]))
+        .reset_index()
+    )
+    df_ln.columns = ["ticker", "Mean_ln", "Std_ln", "t_ln"]
+
+
+    # Merge & sort
+    out = pd.merge(df_diff, df_ln, on="ticker", how="inner")
+    out = sort_table_df(out, df, name)
+    out["ticker"] = vp.ticker_list_to_ordered_map(out["ticker"])["ticker_out"]
+    out["name"] = vp.ticker_list_to_ordered_map(out["ticker"])["name"]
+    out["name"] = out.apply(lambda row: row["name"].replace("&", r"\&").replace(" ETF", r"").replace(" Trust", r"").replace(" (new)", r"").replace(r" S\&P 500 Index", r"USA"), axis=1)
+
+    # get current list of columns
+    cols = out.columns.tolist()
+
+    # remove "name" and re-insert it right after "ticker"
+    cols.insert(cols.index("ticker") + 1, cols.pop(cols.index("name")))
+
+    # reindex your DataFrame
+    out = out[cols]
+
+    if save_latex:
+        # 3) Generate LaTeX and write file
+        latex = CarrWu2009_table_3_latex_with_names(out, name)
+        with open(f"figures/Analysis/Profitability/{name}_table_3 with names.tex", "w") as f:
+            f.write(latex)
+
+    return out
+
+
+def CarrWu2009_table_3_latex_with_names(table_df, name):
     """
-    Prints a LaTeX-formatted table with multi-level headers:
-      - Panel A: (RV - SW_0_30) x 100
-      - Panel B: ln(RV / SW_0_30)
-    Each panel displays: Mean, Std. dev., Auto, Skew, Kurt, and t.
+    Generates a longtable with:
+      - Line number
+      - Panel A: (RV - SW) × 100 (Mean, Std. dev., Auto, Skew, Kurt, t)
+      - Panel B: ln(RV / SW) (Mean, Std. dev., Auto, Skew, Kurt, t, SR)
     """
 
-    panel_A = "Panel A: (RV - SW) x 100"
+    panel_A = "Panel A: (RV - SW) × 100"
     panel_B = "Panel B: ln(RV / SW)"
 
-    # 1) Reorder & set up MultiIndex (as you already do)…
+    # 1) Reorder & set up MultiIndex
     table_df = table_df[
         [
-            "ticker",
-            "Mean_diff", "Std_diff", "Auto_diff", "Skew_diff", "Kurt_diff", "t_diff",
-            "Mean_ln",   "Std_ln",   "Auto_ln",   "Skew_ln",   "Kurt_ln",   "t_ln", "SR_ann"
+            "ticker", "name",
+            "Mean_diff", "Std_diff", "t_diff",
+            "Mean_ln",   "Std_ln",   "t_ln"
         ]
     ]
+    # insert line numbers
+    # table_df.insert(2, ("", "No."), range(1, len(table_df) + 1))
+    # rename columns to a two‐level header
     table_df.columns = pd.MultiIndex.from_tuples([
         ("", "Ticker"),
-        (panel_A, "Mean"),
-        (panel_A, "Std. dev."),
-        (panel_A, "Auto"),
-        (panel_A, "Skew"),
-        (panel_A, "Kurt"),
-        (panel_A, "t"),
-        (panel_B, "Mean"),
-        (panel_B, "Std. dev."),
-        (panel_B, "Auto"),
-        (panel_B, "Skew"),
-        (panel_B, "Kurt"),
-        (panel_B, "t"),
-        (panel_B, "SR")
+        ("", "Beskrivelse"),
+        # ("", "No."),
+        (panel_A,   "Mean"),
+        (panel_A,   "Std. dev."),
+        # (panel_A,   "Auto"),
+        # (panel_A,   "Skew"),
+        # (panel_A,   "Kurt"),
+        (panel_A,     "t"),
+        (panel_B,        "Mean"),
+        (panel_B,        "Std. dev."),
+        # (panel_B,        "Auto"),
+        # (panel_B,        "Skew"),
+        # (panel_B,        "Kurt"),
+        (panel_B,        "t"),
+        # (panel_B,        "SR")
     ])
 
-    # 2) Generate the LaTeX with a 1 cm gap and centered Panel A header
+    # 2) Export as longtable
     latex = table_df.to_latex(
         index=False,
         float_format="%.2f",
         multicolumn=True,
         multirow=True,
-        multicolumn_format="c",                  # center the multicolumns by default
-        column_format='lcccccc||ccccccc'
+        longtable=True,
+        caption=(
+            rf"Summary statistics for average monthly variance risk premium, (RV - SW) × 100, and average monthly log return, ln(RV / SW), for the {name} dataset using monthly values. "
+            "Each panel shows Mean, Std. dev., Auto(1), Skew, Kurt, and Newey West (1987) t-statistic; "
+            "Panel B also reports an annualized Sharpe ratio (SR) of going short the variance swap."
+        ),
+        label=f"tab:analysis:Summary statistics diff and logratio ({name})",
+        column_format='rllccc||ccc',
+        multicolumn_format="c"
     )
 
-    # 3) Split into lines and drop pandas' automatic full-width \midrule
-    lines = [L for L in latex.splitlines() if L.strip() != r'\midrule']
-
-
-    # inject the cmidrule lines
+    # 3) Inject cmidrule under the top header
     lines = latex.splitlines()
-    # find where to insert (after the multicolumn header)
     for i, line in enumerate(lines):
         if line.strip().startswith(r'\toprule'):
-            insert_pos = i + 2
+            # after \toprule and the next header line
+            lines.insert(i + 2, r'\cmidrule(lr){4-6}\cmidrule(lr){7-9}')
             break
-    lines.insert(insert_pos, r'\cmidrule(lr){2-7}\cmidrule(lr){8-13}')
 
-    return '\n'.join(lines)
+    # 4) Add size commands & float barrier
+    lines.insert(0, r'\scriptsize')
+    lines.append(r'\normalsize')
+
+    return "\n".join(lines)
+
+
 
 
 import load_clean_lib
@@ -1798,9 +1906,109 @@ def ff5_factor_table(returns_df, name,
 
 
 
+def ff5_SW_factor_table(returns_df, name,
+                         y_var="r_30_SW_day", max_lags=0):
+    import numpy as np
+    import pandas as pd
+    import statsmodels.api as sm
+    import volpy_func_ticker_lib as vtp
+
+    SPX_SW = vtp.concat_ticker_datasets(["SPX"], "sum1", folder_version="_om")[["date", y_var]]
+
+    if max_lags is not None:
+        ann_faktor = 1
+        returns_df = returns_df.copy()
+        for col in ["Mkt", "SMB", "HML", "BAB", "UMD"]:
+            returns_df[col] = np.log(returns_df[col]+1)
+            returns_df[col] = returns_df[col].rolling(window=max_lags).sum().shift(-max_lags)
+    else:
+        ann_faktor = 252
+
+    # build a Series indexed by date and map it into returns_df
+    returns_df['LVRP'] = returns_df['date'].map(
+        SPX_SW.set_index('date')[y_var]
+    )
+
+    records = []
+    for ticker, g in returns_df.groupby("ticker"):
+        rec = {"Ticker": ticker}
+
+        # require all five factors + the dep var
+        g0 = g.dropna(subset=[y_var, "Mkt", "SMB", "HML", "BAB", "UMD", "LVRP"])
+        if len(g0):
+            X = sm.add_constant(g0[["Mkt","SMB","HML","BAB","UMD", "LVRP"]])
+
+            if max_lags is not None:
+                fit = sm.OLS(g0[y_var], X).fit(cov_type="HAC", cov_kwds={"maxlags": max_lags})
+            else:
+                fit = sm.OLS(g0[y_var], X).fit()
+
+            ps = fit.params * np.array([ann_faktor] + [1]*6)
+            ts = fit.tvalues
+            r2 = fit.rsquared
+
+            α, βm, s, h, b_bab, m_umd, b_SW = ps
+            tα, tβm, tsmb, thml, tbab, tumd, t_SW = (
+                ts["const"], ts["Mkt"], ts["SMB"], ts["HML"], ts["BAB"], ts["UMD"], ts["LVRP"]
+            )
+        else:
+            α = βm = s = h = b_bab = m_umd = b_SW = np.nan
+            tα = tβm = tsmb = thml = tbab = tumd = t_SW = r2 = np.nan
+
+        rec.update({
+            r"\(\alpha\)":      f"{α:.3f}\n({tα:.3f})",
+            r"\(ER^m\)"   :      f"{βm:.3f}\n({tβm:.3f})",
+            r"\mathrm{SMB}":     f"{s:.3f}\n({tsmb:.3f})",
+            r"\mathrm{HML}":     f"{h:.3f}\n({thml:.3f})",
+            r"\mathrm{BAB}":     f"{b_bab:.3f}\n({tbab:.3f})",
+            r"\mathrm{UMD}":     f"{m_umd:.3f}\n({tumd:.3f})",
+            r"\mathrm{LVRP}":     f"{b_SW:.3f}\n({t_SW:.3f})",
+            r"\(R^2\)"    :      f"{r2:.3f}",
+        })
+        records.append(rec)
+
+    df = pd.DataFrame(records)
+    df.rename(columns={'Ticker': 'ticker'}, inplace=True)
+    df = sort_table_df(df, returns_df, name)
+    df["ticker"] = vp.ticker_list_to_ordered_map(df["ticker"])["ticker"]
+    df.rename(columns={'ticker': 'Ticker'}, inplace=True)
+
+    df.set_index("Ticker")
+
+    caption = (
+        "Explaining variance risk premiums with Fama–French factors plus Betting-Against-Beta and Momentum as well as the SPX swap. "
+        "Entries report the GMM estimates (and t-statistics in parentheses) of "
+        r"$\ln RV_{t,\tau}/SW_{t,\tau}="
+        # r"\alpha+\beta ER^m_{t,\tau}+s\,SMB_{t,\tau}+h\,HML_{t,\tau}"
+        # r"+b\,BAB_{t,\tau}+m\,UMD_{t,\tau}+e$, "
+        # "and unadjusted $R^2$."
+    )
+
+    df.insert(0, "No.", range(1, len(df) + 1))
+    latex = (
+        df.to_latex(index=False, escape=False, longtable=True,
+                    caption=caption,
+                    label=f"tab:analysis:ff{name}_5f_SW_included",
+                    column_format="lccccccccc",
+                    float_format="%.3f")
+          .splitlines()
+    )
+
+    return "\n".join(["\\scriptsize"] + latex + ["\\normalsize"]), df
+
+
+
+
 def save_ff5_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
     tex, df = ff5_factor_table(returns_df, name, y_var, max_lags = max_lags)
     with open(f"figures/Analysis/Factor models/{name}_{y_var.replace("/", "_")}_table_ff5.tex", "w") as f:
+        f.write(tex)
+    return df
+
+
+def save_ff5_SW_table(returns_df, name, y_var = "r_30_SW_day", max_lags = 0):
+    tex, df = ff5_SW_factor_table(returns_df, name, y_var, max_lags = max_lags)
+    with open(f"figures/Analysis/Factor models/{name}_{y_var.replace("/", "_")}_table_ff5_SW.tex", "w") as f:
         f.write(tex)
     return df
 
