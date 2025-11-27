@@ -1,16 +1,10 @@
+
 # Old experiments shouldn't affect language stats
 Old\ stuff/** linguist-vendored
 Code\ to\ produce\ results/Old\ stuff/** linguist-vendored
-
-# PDFs shouldn't influence language breakdown
-# *.pdf -linguist-detectable
 
 # Notebooks in "Code to produce results" should count as Python
 Code\ to\ produce\ results/*.ipynb linguist-language=Python
 
 # Root-level "Variance strategies.ipynb" should also count as Python
 Variance\ strategies.ipynb linguist-language=Python
-
-
-# Count notebooks as Python instead of "Jupyter Notebook"
-# *.ipynb linguist-language=Python
